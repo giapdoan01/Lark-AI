@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import { getTableData, checkSDKStatus, debugTableStructure } from "../lib/base"
-import { askAI } from "../lib/groqClient"
+import { askAI, testGroqAPI } from "../lib/groqClient"
 
 interface ChatBotProps {
   tableId: string
@@ -17,11 +17,18 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [isAsking, setIsAsking] = useState(false)
   const [sdkStatus, setSdkStatus] = useState<string>("")
   const [debugInfo, setDebugInfo] = useState<string>("")
+  const [apiStatus, setApiStatus] = useState<string>("")
 
   const runDebug = async () => {
     console.log("🔍 Chạy debug...")
     await debugTableStructure(tableId)
     setDebugInfo("Debug completed - check console for details")
+  }
+
+  const testAPI = async () => {
+    console.log("🧪 Testing API...")
+    const result = await testGroqAPI()
+    setApiStatus(`API Test: ${result.success ? "✅" : "❌"} ${result.message}`)
   }
 
   useEffect(() => {
@@ -38,6 +45,9 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         if (status.status === "error") {
           throw new Error(status.message)
         }
+
+        // Test API
+        await testAPI()
 
         // Lấy dữ liệu bảng
         console.log("📥 Bắt đầu lấy dữ liệu bảng...")
@@ -67,18 +77,30 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     if (!question.trim() || tableData.length === 0) return
 
     setIsAsking(true)
-    try {
-      const context = `Bạn là một AI assistant thông minh. Dưới đây là dữ liệu từ bảng &quot;${tableName}&quot; trong Lark Base:
+    setAnswer("") // Clear previous answer
 
-${JSON.stringify(tableData, null, 2)}
+    try {
+      console.log("🤖 Bắt đầu xử lý câu hỏi...")
+
+      // Tạo context với dữ liệu rút gọn nếu cần
+      const dataPreview = tableData.slice(0, 5) // Chỉ lấy 5 records đầu tiên
+      const context = `Bạn là một AI assistant thông minh. Dưới đây là dữ liệu từ bảng "${tableName}" trong Lark Base:
+
+${JSON.stringify(dataPreview, null, 2)}
+
+${tableData.length > 5 ? `\n(Hiển thị 5/${tableData.length} records đầu tiên)` : ""}
 
 Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùng một cách chính xác và hữu ích. Trả lời bằng tiếng Việt.`
 
+      console.log("📝 Context được tạo, độ dài:", context.length)
+
       const response = await askAI(context, question)
       setAnswer(response)
+      console.log("✅ Đã nhận được câu trả lời từ AI")
     } catch (err) {
       console.error("❌ Lỗi khi hỏi AI:", err)
-      setAnswer("❌ Đã xảy ra lỗi khi xử lý câu hỏi. Vui lòng thử lại.")
+      const errorMessage = err instanceof Error ? err.message : String(err)
+      setAnswer(`❌ Lỗi khi xử lý câu hỏi: ${errorMessage}`)
     } finally {
       setIsAsking(false)
     }
@@ -89,6 +111,7 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
       <div>
         <div>🔄 Đang tải dữ liệu từ bảng &quot;{tableName}&quot;...</div>
         {sdkStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>{sdkStatus}</div>}
+        {apiStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>{apiStatus}</div>}
       </div>
     )
   }
@@ -97,7 +120,10 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
     <div>
       <h2>📊 Bảng: {tableName}</h2>
 
-      {sdkStatus && <div style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>✅ {sdkStatus}</div>}
+      <div style={{ marginBottom: "15px", fontSize: "12px", color: "#666" }}>
+        {sdkStatus && <div>✅ {sdkStatus}</div>}
+        {apiStatus && <div>{apiStatus}</div>}
+      </div>
 
       {error && (
         <div
@@ -113,6 +139,9 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
           <div style={{ marginTop: "10px" }}>
             <button onClick={runDebug} style={{ marginRight: "10px", fontSize: "12px" }}>
               🔍 Chạy Debug
+            </button>
+            <button onClick={testAPI} style={{ marginRight: "10px", fontSize: "12px" }}>
+              🧪 Test API
             </button>
             <button onClick={() => window.location.reload()} style={{ fontSize: "12px" }}>
               🔄 Thử lại
@@ -144,7 +173,8 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
               fontSize: "12px",
             }}
           >
-            {JSON.stringify(tableData, null, 2)}
+            {JSON.stringify(tableData.slice(0, 3), null, 2)}
+            {tableData.length > 3 && `\n\n... và ${tableData.length - 3} records khác`}
           </pre>
         )}
       </div>
@@ -152,6 +182,10 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
       {tableData.length > 0 && (
         <div>
           <h3>🤖 Hỏi AI về dữ liệu:</h3>
+          <div style={{ marginBottom: "10px", fontSize: "12px", color: "#666" }}>
+            💡 Mẹo: Hãy hỏi cụ thể như &quot;Tổng hợp dữ liệu&quot;, &quot;Phân tích xu hướng&quot;, &quot;Thống kê số
+            liệu&quot;
+          </div>
           <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
@@ -159,18 +193,23 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
             rows={3}
             style={{ width: "100%", marginBottom: "10px" }}
           />
-          <button onClick={handleAskQuestion} disabled={isAsking || !question.trim()}>
-            {isAsking ? "🤔 Đang suy nghĩ..." : "🚀 Hỏi AI"}
-          </button>
+          <div style={{ marginBottom: "10px" }}>
+            <button onClick={handleAskQuestion} disabled={isAsking || !question.trim()}>
+              {isAsking ? "🤔 Đang suy nghĩ..." : "🚀 Hỏi AI"}
+            </button>
+            <button onClick={testAPI} style={{ marginLeft: "10px", fontSize: "12px" }}>
+              🧪 Test API
+            </button>
+          </div>
 
           {answer && (
             <div
               style={{
                 marginTop: "20px",
                 padding: "15px",
-                backgroundColor: "#e8f5e8",
+                backgroundColor: answer.includes("❌") ? "#ffe6e6" : "#e8f5e8",
                 borderRadius: "6px",
-                border: "1px solid #4caf50",
+                border: `1px solid ${answer.includes("❌") ? "#ff4444" : "#4caf50"}`,
               }}
             >
               <h4>💡 Câu trả lời từ AI:</h4>
