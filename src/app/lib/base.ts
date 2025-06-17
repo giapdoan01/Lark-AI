@@ -1,4 +1,4 @@
-import { base, ITable } from '@lark-base-open/js-sdk'
+import { base } from '@lark-base-open/js-sdk'
 
 interface FieldMeta {
   id: string
@@ -14,26 +14,23 @@ interface ResponseWithItems {
   items: RecordItem[]
 }
 
-// ✅ Tạo interface mở rộng nếu biết chắc `name` tồn tại
-interface TableWithName extends ITable {
-  name: string
-}
-
 interface TableData {
-  tableName: string
+  tableId: string
   fields: FieldMeta[]
   data: Record<string, unknown>[]
 }
 
 export const getTableData = async (tableId: string): Promise<TableData> => {
-  const table = (await base.getTable(tableId)) as TableWithName
+  const table = await base.getTable(tableId)
 
+  // Kiểm tra nếu không có bảng
+  if (!table) throw new Error(`Không tìm thấy bảng với ID: ${tableId}`)
+
+  const fields: FieldMeta[] = await table.getFieldMetaList()
   const response = await table.getRecords({})
   const records = (response as unknown as ResponseWithItems).items || []
 
-  const fields: FieldMeta[] = await table.getFieldMetaList()
-
-  const data = records.map(record => {
+  const data = records.map((record) => {
     const row: Record<string, unknown> = {}
     for (const field of fields) {
       row[field.name] = record.fields[field.id]
@@ -42,7 +39,7 @@ export const getTableData = async (tableId: string): Promise<TableData> => {
   })
 
   return {
-    tableName: table.name,
+    tableId, // dùng tableId thay vì table.name (vì `table.name` không có trong SDK)
     fields,
     data,
   }
