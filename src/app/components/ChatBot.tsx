@@ -12,8 +12,8 @@ export default function ChatBot({ tableId }: { tableId: string }) {
 
   useEffect(() => {
     const loadData = async () => {
-      const { tableName, data } = await getTableData(tableId)
-      const contextText = `Dữ liệu bảng "${tableName}":\n` + JSON.stringify(data, null, 2)
+      const { data } = await getTableData(tableId)
+      const contextText = `Dữ liệu bảng:\n` + JSON.stringify(data, null, 2)
       setContext(contextText)
     }
     loadData()
