@@ -1,6 +1,6 @@
 import { bitable } from "@lark-base-open/js-sdk"
 
-export interface TableRecord {
+export interface TableRecord extends Record<string, unknown> {
   recordId: string
   fields: Record<string, unknown>
 }

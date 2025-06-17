@@ -9,7 +9,7 @@ interface ChatBotProps {
 }
 
 export default function ChatBot({ tableId, tableName }: ChatBotProps) {
-  const [tableData, setTableData] = useState<any[]>([])
+  const [tableData, setTableData] = useState<Array<{ recordId: string; fields: Record<string, unknown> }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [question, setQuestion] = useState("")
@@ -40,7 +40,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
     setIsAsking(true)
     try {
-      const context = `Bạn là một AI assistant thông minh. Dưới đây là dữ liệu từ bảng "${tableName}" trong Lark Base:
+      const context = `Bạn là một AI assistant thông minh. Dưới đây là dữ liệu từ bảng &quot;${tableName}&quot; trong Lark Base:
 
 ${JSON.stringify(tableData, null, 2)}
 
@@ -57,7 +57,7 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
   }
 
   if (loading) {
-    return <div>🔄 Đang tải dữ liệu từ bảng "{tableName}"...</div>
+    return <div>🔄 Đang tải dữ liệu từ bảng &quot;{tableName}&quot;...</div>
   }
 
   if (error) {
