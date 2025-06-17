@@ -23,9 +23,9 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [isAutoAnalyzing, setIsAutoAnalyzing] = useState(false)
 
   const runDebug = async () => {
-    console.log("🔍 Chạy debug...")
+    console.log("🔍 Chạy detailed debug...")
     await debugTableStructure(tableId)
-    setDebugInfo("Debug completed - check console for details")
+    setDebugInfo("Detailed debug completed - check console for comprehensive analysis")
   }
 
   const testAPI = async () => {
@@ -40,6 +40,13 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   // Function để AI tự động phân tích dữ liệu khi load xong
   const performAutoAnalysis = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
     if (data.length === 0) return
+
+    // Kiểm tra xem có dữ liệu thực không
+    const hasRealData = data.some((record) => Object.keys(record.fields).length > 0)
+    if (!hasRealData) {
+      setAutoAnalysis("⚠️ Dữ liệu chỉ có recordId mà không có thông tin chi tiết fields. Cần debug để khắc phục.")
+      return
+    }
 
     setIsAutoAnalyzing(true)
     try {
@@ -86,8 +93,8 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`
         // Test API
         await testAPI()
 
-        // Lấy dữ liệu bảng
-        console.log("📥 Bắt đầu lấy dữ liệu bảng...")
+        // Lấy dữ liệu bảng với methods mới
+        console.log("📥 Bắt đầu lấy dữ liệu bảng với methods cải tiến...")
         const data = await getTableData(tableId)
         console.log("✅ Kết quả cuối cùng:", data)
 
@@ -96,9 +103,16 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`
         if (data.length === 0) {
           setError("Bảng không có dữ liệu hoặc không thể đọc được records. Hãy thử debug để xem chi tiết.")
         } else {
-          // Tự động phân tích dữ liệu khi load xong
-          console.log("🚀 Bắt đầu phân tích tự động...")
-          await performAutoAnalysis(data)
+          // Kiểm tra xem có dữ liệu thực không
+          const hasRealData = data.some((record) => Object.keys(record.fields).length > 0)
+
+          if (hasRealData) {
+            // Tự động phân tích dữ liệu khi load xong
+            console.log("🚀 Bắt đầu phân tích tự động...")
+            await performAutoAnalysis(data)
+          } else {
+            setError("Đã lấy được records nhưng không có thông tin chi tiết fields. Vui lòng chạy debug để khắc phục.")
+          }
         }
       } catch (err) {
         console.error("❌ Lỗi khi lấy dữ liệu bảng:", err)
@@ -123,7 +137,7 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`
     try {
       console.log("🤖 Bắt đầu xử lý câu hỏi...")
 
-      // Sử dụng toàn bộ dữ liệu cho context (không giới hạn)
+      // Sử dụng toàn bộ dữ liệu cho context
       const context = `Bạn là một AI assistant thông minh. Dưới đây là TOÀN BỘ dữ liệu từ bảng "${tableName}" trong Lark Base:
 
 ${JSON.stringify(tableData, null, 2)}
@@ -156,6 +170,9 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
     return (
       <div>
         <div>🔄 Đang tải dữ liệu từ bảng &quot;{tableName}&quot;...</div>
+        <div style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>
+          🔧 Đang thử nhiều phương pháp để lấy dữ liệu chi tiết...
+        </div>
         {sdkStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>{sdkStatus}</div>}
         {apiStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>{apiStatus}</div>}
         {isAutoAnalyzing && (
@@ -190,7 +207,7 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
           ❌ {error}
           <div style={{ marginTop: "10px" }}>
             <button onClick={runDebug} style={{ marginRight: "10px", fontSize: "12px" }}>
-              🔍 Chạy Debug
+              🔍 Detailed Debug
             </button>
             <button onClick={testAPI} style={{ marginRight: "10px", fontSize: "12px" }}>
               🧪 Test API
@@ -235,7 +252,7 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
             <p>⚠️ Không có dữ liệu để hiển thị</p>
             <p style={{ fontSize: "12px", color: "#666" }}>Có thể bảng trống hoặc có vấn đề với quyền truy cập</p>
             <button onClick={runDebug} style={{ fontSize: "12px" }}>
-              🔍 Debug Table Structure
+              🔍 Detailed Debug
             </button>
           </div>
         ) : (
@@ -255,7 +272,8 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
                 marginTop: "10px",
               }}
             >
-              {JSON.stringify(tableData, null, 2)}
+              {JSON.stringify(tableData.slice(0, 5), null, 2)}
+              {tableData.length > 5 && `\n\n... và ${tableData.length - 5} records khác`}
             </pre>
           </details>
         )}
@@ -265,7 +283,7 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
         <div>
           <h3>🤖 Hỏi AI về dữ liệu:</h3>
           <div style={{ marginBottom: "10px", fontSize: "12px", color: "#666" }}>
-            💡 AI đã đọc toàn bộ {tableData.length} records. Bạn có thể hỏi bất kỳ câu hỏi nào về dữ liệu!
+            💡 AI đã đọc toàn bộ {tableData.length} records với thông tin chi tiết. Bạn có thể hỏi bất kỳ câu hỏi nào!
             <br />🔍 Ví dụ: &quot;Phân tích theo phòng ban&quot;, &quot;Thống kê tài sản&quot;, &quot;Tìm xu hướng&quot;
           </div>
           <textarea
@@ -284,6 +302,9 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
             </button>
             <button onClick={refreshAnalysis} style={{ marginLeft: "10px", fontSize: "12px" }}>
               🔄 Phân tích lại
+            </button>
+            <button onClick={runDebug} style={{ marginLeft: "10px", fontSize: "12px" }}>
+              🔍 Debug
             </button>
           </div>
 
