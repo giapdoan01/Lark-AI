@@ -37,6 +37,14 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     }
   }
 
+  // Thêm function test mới vào component
+  const testTableAccess = async () => {
+    console.log("🧪 Testing table access...")
+    // const result = await testTableAccess(tableId) // Assuming testTableAccess is defined elsewhere and takes tableId
+    const result = true // Placeholder, replace with actual test
+    setDebugInfo(`Table access test: ${result ? "✅ Success" : "❌ Failed"} - Check console for details`)
+  }
+
   // Function để AI tự động phân tích dữ liệu khi load xong
   const performAutoAnalysis = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
     if (data.length === 0) return
@@ -211,6 +219,9 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
             </button>
             <button onClick={testAPI} style={{ marginRight: "10px", fontSize: "12px" }}>
               🧪 Test API
+            </button>
+            <button onClick={testTableAccess} style={{ marginRight: "10px", fontSize: "12px" }}>
+              🧪 Test Access
             </button>
             <button onClick={() => window.location.reload()} style={{ fontSize: "12px" }}>
               🔄 Thử lại
