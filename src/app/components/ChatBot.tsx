@@ -1,44 +1,55 @@
 'use client'
 import { useEffect, useState } from 'react'
+import TableSelector from './TableSelector'
 import { getTableData } from '../lib/base'
-import { askAI } from '@/ultis/groqClient'
 
-export default function ChatBot({ tableId }: { tableId: string }) {
-  const [chat, setChat] = useState<string[]>([])
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const [context, setContext] = useState<string>('')
+export default function ChatBot() {
+  const [tableId, setTableId] = useState<string | null>(null)
+  const [tableName, setTableName] = useState<string>('')
+  const [context, setContext] = useState('')
 
   useEffect(() => {
+    if (!tableId) return
+
     const loadData = async () => {
-      const { data } = await getTableData(tableId)
-      const contextText = `Dữ liệu bảng:\n` + JSON.stringify(data, null, 2)
-      setContext(contextText)
+      try {
+        const { tableName, data } = await getTableData(tableId)
+        console.log('📥 Dữ liệu từ bảng:', data)
+        setTableName(tableName)
+
+        if (data.length === 0) {
+          setContext('⚠️ Bảng bạn chọn không có dữ liệu.')
+        } else {
+          setContext(`📊 Dữ liệu bảng "${tableName}":\n${JSON.stringify(data, null, 2)}`)
+        }
+      } catch (error) {
+        console.error('❌ Lỗi khi lấy dữ liệu bảng:', error)
+        setContext('❌ Đã xảy ra lỗi khi đọc dữ liệu từ bảng.')
+      }
     }
+
     loadData()
   }, [tableId])
 
-  const handleAsk = async () => {
-    setLoading(true)
-    const response = await askAI(context, input)
-    setChat(prev => [...prev, `👤 ${input}`, `🤖 ${response}`])
-    setInput('')
-    setLoading(false)
-  }
-
   return (
     <div>
-      {chat.map((msg, idx) => (
-        <p key={idx}>{msg}</p>
-      ))}
-      <input
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && handleAsk()}
-        disabled={loading}
-        placeholder="Hỏi về dữ liệu..."
+      <TableSelector
+        onSelect={(id, name) => {
+          console.log('🟢 Bảng được chọn:', id)
+          setTableId(id)
+          setTableName(name)
+        }}
       />
+      <pre
+        style={{
+          whiteSpace: 'pre-wrap',
+          backgroundColor: '#f9f9f9',
+          padding: '10px',
+          borderRadius: '6px',
+        }}
+      >
+        {context}
+      </pre>
     </div>
   )
 }

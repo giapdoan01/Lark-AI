@@ -10,27 +10,20 @@ interface RecordItem {
   fields: Record<string, unknown>
 }
 
-interface ResponseWithItems {
-  items: RecordItem[]
-}
-
 interface TableData {
-  tableId: string
+  tableName: string
   fields: FieldMeta[]
   data: Record<string, unknown>[]
 }
 
 export const getTableData = async (tableId: string): Promise<TableData> => {
   const table = await base.getTable(tableId)
-
-  // Kiểm tra nếu không có bảng
-  if (!table) throw new Error(`Không tìm thấy bảng với ID: ${tableId}`)
-
-  const fields: FieldMeta[] = await table.getFieldMetaList()
+  const tableMeta = await table.getMeta() // lấy tên bảng
+  const fields = await table.getFieldMetaList()
   const response = await table.getRecords({})
-  const records = (response as unknown as ResponseWithItems).items || []
+  const records: RecordItem[] = (response as any).items || []
 
-  const data = records.map((record) => {
+  const data = records.map(record => {
     const row: Record<string, unknown> = {}
     for (const field of fields) {
       row[field.name] = record.fields[field.id]
@@ -39,7 +32,7 @@ export const getTableData = async (tableId: string): Promise<TableData> => {
   })
 
   return {
-    tableId, // dùng tableId thay vì table.name (vì `table.name` không có trong SDK)
+    tableName: tableMeta.name,
     fields,
     data,
   }
