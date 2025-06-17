@@ -4,7 +4,7 @@ import TableSelector from './components/TableSelector'
 import ChatBot from './components/ChatBot'
 
 export default function Home() {
-  const [tableId, setTableId] = useState('')
+  const [tableId, setTableId] = useState<string | null>(null)
 
   return (
     <div>
