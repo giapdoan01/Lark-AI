@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useState } from "react"
-import { getTableData } from "../lib/base"
+import { getTableData, getTableDataAlternative, checkSDKStatus, debugTableAPI } from "../lib/base"
 import { askAI } from "../lib/groqClient"
 
 interface ChatBotProps {
@@ -15,25 +15,54 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [question, setQuestion] = useState("")
   const [answer, setAnswer] = useState("")
   const [isAsking, setIsAsking] = useState(false)
+  const [sdkStatus, setSdkStatus] = useState<string>("")
+  const [debugMode, setDebugMode] = useState(false)
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true)
-        const data = await getTableData(tableId)
-        console.log("📥 Dữ liệu từ bảng:", data)
-        setTableData(data)
         setError(null)
+
+        // Kiểm tra SDK trước
+        console.log("🔍 Kiểm tra SDK status...")
+        const status = await checkSDKStatus()
+        setSdkStatus(`SDK Status: ${status.status} - ${status.message}`)
+
+        if (status.status === "error") {
+          throw new Error(status.message)
+        }
+
+        // Debug API nếu cần
+        if (debugMode) {
+          await debugTableAPI(tableId)
+        }
+
+        // Thử phương pháp chính trước
+        console.log("📥 Thử phương pháp chính...")
+        let data
+        try {
+          data = await getTableData(tableId)
+        } catch (mainError) {
+          console.log("❌ Phương pháp chính thất bại, thử phương pháp thay thế...")
+          data = await getTableDataAlternative(tableId)
+        }
+
+        console.log("✅ Dữ liệu từ bảng:", data)
+        setTableData(data)
       } catch (err) {
         console.error("❌ Lỗi khi lấy dữ liệu bảng:", err)
-        setError("Không thể đọc dữ liệu từ bảng. Vui lòng kiểm tra quyền truy cập.")
+        const errorMessage = err instanceof Error ? err.message : String(err)
+        setError(`Lỗi: ${errorMessage}`)
       } finally {
         setLoading(false)
       }
     }
 
-    if (tableId) loadData()
-  }, [tableId])
+    if (tableId) {
+      loadData()
+    }
+  }, [tableId, debugMode])
 
   const handleAskQuestion = async () => {
     if (!question.trim() || tableData.length === 0) return
@@ -57,16 +86,46 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
   }
 
   if (loading) {
-    return <div>🔄 Đang tải dữ liệu từ bảng &quot;{tableName}&quot;...</div>
+    return (
+      <div>
+        <div>🔄 Đang tải dữ liệu từ bảng &quot;{tableName}&quot;...</div>
+        {sdkStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>{sdkStatus}</div>}
+      </div>
+    )
   }
 
   if (error) {
-    return <div style={{ color: "red" }}>❌ {error}</div>
+    return (
+      <div>
+        <div style={{ color: "red", marginBottom: "10px" }}>❌ {error}</div>
+        {sdkStatus && <div style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>{sdkStatus}</div>}
+
+        <details style={{ marginTop: "10px" }}>
+          <summary style={{ cursor: "pointer", color: "#666" }}>🔍 Thông tin debug (click để xem)</summary>
+          <div style={{ marginTop: "10px", fontSize: "12px", fontFamily: "monospace" }}>
+            <div>Table ID: {tableId}</div>
+            <div>Table Name: {tableName}</div>
+            <div>SDK Status: {sdkStatus}</div>
+            <div>Kiểm tra Console để xem log chi tiết</div>
+            <label style={{ display: "block", marginTop: "10px" }}>
+              <input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} /> Bật debug
+              mode
+            </label>
+          </div>
+        </details>
+
+        <button onClick={() => window.location.reload()} style={{ marginTop: "10px" }}>
+          🔄 Thử lại
+        </button>
+      </div>
+    )
   }
 
   return (
     <div>
       <h2>📊 Bảng: {tableName}</h2>
+
+      {sdkStatus && <div style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>✅ {sdkStatus}</div>}
 
       <div style={{ marginBottom: "20px" }}>
         <h3>📋 Dữ liệu bảng ({tableData.length} bản ghi):</h3>
