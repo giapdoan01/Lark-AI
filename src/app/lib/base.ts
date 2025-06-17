@@ -1,4 +1,4 @@
-import { base, IGetRecordsResponse } from '@lark-base-open/js-sdk'
+import { base } from '@lark-base-open/js-sdk'
 
 interface FieldMeta {
   id: string
@@ -14,12 +14,10 @@ interface TableData {
 
 export const getTableData = async (tableId: string): Promise<TableData> => {
   const table = await base.getTable(tableId)
+
+  // Ép kiểu an toàn qua `unknown` rồi mới về đúng kiểu
   const response = await table.getRecords({})
-
-  // Ép kiểu tạm qua unknown → rồi ép lại có kiểm tra "items"
-  const maybeWithItems = response as unknown as { items?: any[] }
-
-  const items = Array.isArray(maybeWithItems.items) ? maybeWithItems.items : []
+  const items = (response as unknown as { items?: { fields: Record<string, unknown> }[] }).items || []
 
   const fields = await table.getFieldMetaList()
   const meta = await table.getMeta()
