@@ -1,49 +1,33 @@
-import { base, bitable } from '@lark-base-open/js-sdk'
+import { bitable } from "@lark-base-open/js-sdk"
 
-interface FieldMeta {
-    id: string
-    name: string
+export interface TableRecord {
+  recordId: string
+  fields: Record<string, unknown>
 }
 
-interface TableData {
-    tableId: string
-    tableName: string
-    fields: FieldMeta[]
-    data: Record<string, unknown>[]
-}
+export const getTableData = async (tableId: string): Promise<TableRecord[]> => {
+  try {
+    // Lấy bảng theo ID
+    const table = await bitable.base.getTableById(tableId)
 
-export async function getTableData(tableId: string): Promise<{
-    tableName: string
-    data: Record<string, unknown>[]
-}> {
-    const base = await bitable.base.getCurrent()
-    const table = await base.getTableById(tableId)
-    const tableMeta = await table.getFieldMetaList()
-
-    // ✅ Tìm view đầu tiên KHÔNG bị ẩn bản ghi
+    // Lấy danh sách view (chọn view đầu tiên)
     const views = await table.getViewList()
-    const targetView = views[0] // Bạn có thể cho chọn view trong giao diện nếu muốn
-
-    const recordsRes = await targetView.getRecords()
-    console.log("✅ Views:", views.map(v => v.name))
-    console.log("✅ View đang dùng:", targetView.name)
-    console.log("✅ Records raw:", recordsRes)
-
-    // ✅ Nếu không có bản ghi, in ra log để debug
-    if (recordsRes.records.length === 0) {
-        console.warn('⚠️ Không có bản ghi nào được trả về từ view:', targetView.name)
+    if (views.length === 0) {
+      throw new Error("Bảng không có view nào")
     }
 
-    const records = recordsRes.records.map(record => {
-        const rowData: Record<string, unknown> = {}
-        for (const field of tableMeta) {
-            rowData[field.name] = record.fields[field.id]
-        }
-        return rowData
-    })
+    const view = views[0]
 
-    return {
-        tableName: table.name,
-        data: records,
-    }
+    // Lấy tất cả records từ view
+    const records = await view.getRecords()
+
+    // Chuyển đổi dữ liệu thành format dễ đọc
+    return records.map((record) => ({
+      recordId: record.recordId,
+      fields: record.fields,
+    }))
+  } catch (error) {
+    console.error("❌ Lỗi trong getTableData:", error)
+    throw new Error(`Không thể lấy dữ liệu từ bảng: ${error}`)
+  }
 }
