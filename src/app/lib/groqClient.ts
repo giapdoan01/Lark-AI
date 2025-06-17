@@ -5,6 +5,16 @@ const groq = new Groq({
   dangerouslyAllowBrowser: true,
 })
 
+// Danh sách các model khả dụng (theo thứ tự ưu tiên)
+const AVAILABLE_MODELS = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "llama3-70b-8192",
+  "llama3-8b-8192",
+  "mixtral-8x7b-32768",
+  "gemma-7b-it",
+]
+
 // Function để rút gọn dữ liệu nếu quá lớn
 const truncateData = (data: any[], maxLength = 3000): string => {
   const jsonString = JSON.stringify(data, null, 2)
@@ -18,6 +28,46 @@ const truncateData = (data: any[], maxLength = 3000): string => {
   const truncatedString = JSON.stringify(truncatedData, null, 2)
 
   return `${truncatedString}\n\n... (Đã rút gọn từ ${data.length} records để tránh quá tải. Chỉ hiển thị ${truncatedData.length} records đầu tiên)`
+}
+
+// Function thử các model khác nhau
+const tryWithDifferentModels = async (messages: any[], currentModelIndex = 0): Promise<string> => {
+  if (currentModelIndex >= AVAILABLE_MODELS.length) {
+    throw new Error("Tất cả các model đều không khả dụng")
+  }
+
+  const model = AVAILABLE_MODELS[currentModelIndex]
+  console.log(`🤖 Thử model: ${model}`)
+
+  try {
+    const chatCompletion = await groq.chat.completions.create({
+      model: model,
+      messages: messages,
+      temperature: 0.7,
+      max_tokens: 1024,
+      top_p: 1,
+    })
+
+    const response = chatCompletion.choices[0].message.content
+    console.log(`✅ Model ${model} hoạt động thành công`)
+    return response || "Không có câu trả lời từ AI."
+  } catch (error) {
+    console.log(`❌ Model ${model} thất bại:`, error)
+
+    // Nếu model bị decommission hoặc không khả dụng, thử model tiếp theo
+    if (
+      error instanceof Error &&
+      (error.message.includes("decommissioned") ||
+        error.message.includes("not found") ||
+        error.message.includes("invalid_request_error"))
+    ) {
+      console.log(`🔄 Thử model tiếp theo...`)
+      return await tryWithDifferentModels(messages, currentModelIndex + 1)
+    }
+
+    // Nếu là lỗi khác (rate limit, network, etc.), throw ngay
+    throw error
+  }
 }
 
 export const askAI = async (context: string, question: string): Promise<string> => {
@@ -44,27 +94,22 @@ export const askAI = async (context: string, question: string): Promise<string> 
       }
     }
 
-    const chatCompletion = await groq.chat.completions.create({
-      model: "llama-3.1-70b-versatile",
-      messages: [
-        {
-          role: "system",
-          content: context,
-        },
-        {
-          role: "user",
-          content: question,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 1024,
-      top_p: 1,
-    })
+    const messages = [
+      {
+        role: "system" as const,
+        content: context,
+      },
+      {
+        role: "user" as const,
+        content: question,
+      },
+    ]
 
-    const response = chatCompletion.choices[0].message.content
+    // Thử với các model khác nhau
+    const response = await tryWithDifferentModels(messages)
     console.log("✅ Groq API response received")
 
-    return response || "Không có câu trả lời từ AI."
+    return response
   } catch (error) {
     console.error("❌ Chi tiết lỗi Groq API:", error)
 
@@ -78,6 +123,8 @@ export const askAI = async (context: string, question: string): Promise<string> 
         return "📏 Dữ liệu quá lớn để xử lý. Hãy thử với ít dữ liệu hơn hoặc câu hỏi ngắn gọn hơn."
       } else if (error.message.includes("network") || error.message.includes("fetch")) {
         return "🌐 Lỗi kết nối mạng. Vui lòng kiểm tra internet và thử lại."
+      } else if (error.message.includes("Tất cả các model đều không khả dụng")) {
+        return "🤖 Tất cả các AI model hiện tại đều không khả dụng. Vui lòng thử lại sau."
       }
 
       return `❌ Lỗi AI: ${error.message}`
@@ -87,35 +134,49 @@ export const askAI = async (context: string, question: string): Promise<string> 
   }
 }
 
-// Function test API
-export const testGroqAPI = async (): Promise<{ success: boolean; message: string }> => {
-  try {
-    console.log("🧪 Testing Groq API...")
+// Function test API với model mới
+export const testGroqAPI = async (): Promise<{ success: boolean; message: string; workingModel?: string }> => {
+  console.log("🧪 Testing Groq API với các model khả dụng...")
 
-    const testCompletion = await groq.chat.completions.create({
-      model: "llama-3.1-70b-versatile",
-      messages: [
-        {
-          role: "user",
-          content: "Xin chào! Hãy trả lời bằng tiếng Việt: 1+1 bằng bao nhiêu?",
-        },
-      ],
-      temperature: 0.1,
-      max_tokens: 50,
-    })
+  for (const model of AVAILABLE_MODELS) {
+    try {
+      console.log(`🧪 Testing model: ${model}`)
 
-    const response = testCompletion.choices[0].message.content
-    console.log("✅ Test response:", response)
+      const testCompletion = await groq.chat.completions.create({
+        model: model,
+        messages: [
+          {
+            role: "user",
+            content: "Xin chào! Hãy trả lời bằng tiếng Việt: 1+1 bằng bao nhiêu?",
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 50,
+      })
 
-    return {
-      success: true,
-      message: `API hoạt động bình thường. Test response: ${response}`,
-    }
-  } catch (error) {
-    console.error("❌ Test API failed:", error)
-    return {
-      success: false,
-      message: `API test thất bại: ${error}`,
+      const response = testCompletion.choices[0].message.content
+      console.log(`✅ Model ${model} hoạt động! Response:`, response)
+
+      return {
+        success: true,
+        message: `Model ${model} hoạt động bình thường. Test response: ${response}`,
+        workingModel: model,
+      }
+    } catch (error) {
+      console.log(`❌ Model ${model} failed:`, error)
+
+      // Tiếp tục thử model tiếp theo
+      continue
     }
   }
+
+  return {
+    success: false,
+    message: "Tất cả các model đều không khả dụng. Vui lòng kiểm tra API key hoặc thử lại sau.",
+  }
+}
+
+// Function để lấy danh sách model khả dụng
+export const getAvailableModels = (): string[] => {
+  return AVAILABLE_MODELS
 }

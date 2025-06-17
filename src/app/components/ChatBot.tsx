@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import { getTableData, checkSDKStatus, debugTableStructure } from "../lib/base"
-import { askAI, testGroqAPI } from "../lib/groqClient"
+import { askAI, testGroqAPI, getAvailableModels } from "../lib/groqClient"
 
 interface ChatBotProps {
   tableId: string
@@ -18,6 +18,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [sdkStatus, setSdkStatus] = useState<string>("")
   const [debugInfo, setDebugInfo] = useState<string>("")
   const [apiStatus, setApiStatus] = useState<string>("")
+  const [workingModel, setWorkingModel] = useState<string>("")
 
   const runDebug = async () => {
     console.log("🔍 Chạy debug...")
@@ -29,6 +30,9 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     console.log("🧪 Testing API...")
     const result = await testGroqAPI()
     setApiStatus(`API Test: ${result.success ? "✅" : "❌"} ${result.message}`)
+    if (result.workingModel) {
+      setWorkingModel(result.workingModel)
+    }
   }
 
   useEffect(() => {
@@ -123,6 +127,7 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
       <div style={{ marginBottom: "15px", fontSize: "12px", color: "#666" }}>
         {sdkStatus && <div>✅ {sdkStatus}</div>}
         {apiStatus && <div>{apiStatus}</div>}
+        {workingModel && <div>🤖 Đang sử dụng model: {workingModel}</div>}
       </div>
 
       {error && (
@@ -185,6 +190,7 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
           <div style={{ marginBottom: "10px", fontSize: "12px", color: "#666" }}>
             💡 Mẹo: Hãy hỏi cụ thể như &quot;Tổng hợp dữ liệu&quot;, &quot;Phân tích xu hướng&quot;, &quot;Thống kê số
             liệu&quot;
+            <br />🤖 Models khả dụng: {getAvailableModels().join(", ")}
           </div>
           <textarea
             value={question}
