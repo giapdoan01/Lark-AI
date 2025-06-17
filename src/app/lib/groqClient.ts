@@ -15,19 +15,13 @@ const AVAILABLE_MODELS = [
   "gemma-7b-it",
 ]
 
-// Function để rút gọn dữ liệu nếu quá lớn
-const truncateData = (data: any[], maxLength = 3000): string => {
-  const jsonString = JSON.stringify(data, null, 2)
-
-  if (jsonString.length <= maxLength) {
-    return jsonString
+// Function để chia nhỏ dữ liệu nếu quá lớn
+const chunkData = (data: any[], maxChunkSize = 10): any[][] => {
+  const chunks = []
+  for (let i = 0; i < data.length; i += maxChunkSize) {
+    chunks.push(data.slice(i, i + maxChunkSize))
   }
-
-  // Nếu dữ liệu quá lớn, chỉ lấy một vài records đầu tiên
-  const truncatedData = data.slice(0, Math.min(3, data.length))
-  const truncatedString = JSON.stringify(truncatedData, null, 2)
-
-  return `${truncatedString}\n\n... (Đã rút gọn từ ${data.length} records để tránh quá tải. Chỉ hiển thị ${truncatedData.length} records đầu tiên)`
+  return chunks
 }
 
 // Function thử các model khác nhau
@@ -44,7 +38,7 @@ const tryWithDifferentModels = async (messages: any[], currentModelIndex = 0): P
       model: model,
       messages: messages,
       temperature: 0.7,
-      max_tokens: 1024,
+      max_tokens: 2048, // Tăng max_tokens để có câu trả lời dài hơn
       top_p: 1,
     })
 
@@ -76,22 +70,50 @@ export const askAI = async (context: string, question: string): Promise<string> 
     console.log("📝 Context length:", context.length)
     console.log("❓ Question:", question)
 
-    // Kiểm tra độ dài context
-    if (context.length > 8000) {
-      console.log("⚠️ Context quá dài, đang rút gọn...")
-      // Tách dữ liệu từ context
-      const dataMatch = context.match(/Dưới đây là dữ liệu từ bảng[^:]*:\s*([\s\S]*?)\s*Hãy phân tích/)
+    // Nếu context quá lớn, chia nhỏ và xử lý
+    if (context.length > 15000) {
+      console.log("⚠️ Context rất lớn, đang xử lý theo chunks...")
+
+      // Trích xuất dữ liệu từ context
+      const dataMatch = context.match(
+        /Dưới đây là.*?dữ liệu từ bảng[^:]*:\s*([\s\S]*?)\s*(?:Tổng cộng có|Hãy phân tích)/,
+      )
+
       if (dataMatch) {
         try {
           const rawData = dataMatch[1]
           const parsedData = JSON.parse(rawData)
-          const truncatedData = truncateData(parsedData)
-          context = context.replace(rawData, truncatedData)
-          console.log("✅ Đã rút gọn context, độ dài mới:", context.length)
+
+          // Chia dữ liệu thành chunks nhỏ hơn
+          const chunks = chunkData(parsedData, 20)
+          console.log(`📊 Chia dữ liệu thành ${chunks.length} chunks`)
+
+          // Xử lý chunk đầu tiên với context đầy đủ
+          const firstChunkContext = context.replace(
+            rawData,
+            JSON.stringify(chunks[0], null, 2) + `\n\n(Đây là chunk 1/${chunks.length} của dữ liệu)`,
+          )
+
+          const messages = [
+            {
+              role: "system" as const,
+              content: firstChunkContext,
+            },
+            {
+              role: "user" as const,
+              content: question,
+            },
+          ]
+
+          return await tryWithDifferentModels(messages)
         } catch (parseError) {
-          console.log("⚠️ Không thể parse dữ liệu để rút gọn")
+          console.log("⚠️ Không thể parse dữ liệu, sử dụng context gốc rút gọn")
         }
       }
+
+      // Fallback: rút gọn context
+      const truncatedContext = context.substring(0, 12000) + "\n\n... (Dữ liệu đã được rút gọn do quá lớn)"
+      context = truncatedContext
     }
 
     const messages = [
@@ -120,7 +142,7 @@ export const askAI = async (context: string, question: string): Promise<string> 
       } else if (error.message.includes("invalid_api_key")) {
         return "🔑 API key không hợp lệ. Vui lòng kiểm tra cấu hình."
       } else if (error.message.includes("context_length")) {
-        return "📏 Dữ liệu quá lớn để xử lý. Hãy thử với ít dữ liệu hơn hoặc câu hỏi ngắn gọn hơn."
+        return "📏 Dữ liệu quá lớn để xử lý. Hãy thử với câu hỏi cụ thể hơn."
       } else if (error.message.includes("network") || error.message.includes("fetch")) {
         return "🌐 Lỗi kết nối mạng. Vui lòng kiểm tra internet và thử lại."
       } else if (error.message.includes("Tất cả các model đều không khả dụng")) {
@@ -164,8 +186,6 @@ export const testGroqAPI = async (): Promise<{ success: boolean; message: string
       }
     } catch (error) {
       console.log(`❌ Model ${model} failed:`, error)
-
-      // Tiếp tục thử model tiếp theo
       continue
     }
   }

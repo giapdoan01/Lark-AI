@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import { getTableData, checkSDKStatus, debugTableStructure } from "../lib/base"
-import { askAI, testGroqAPI, getAvailableModels } from "../lib/groqClient"
+import { askAI, testGroqAPI } from "../lib/groqClient"
 
 interface ChatBotProps {
   tableId: string
@@ -19,6 +19,8 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [debugInfo, setDebugInfo] = useState<string>("")
   const [apiStatus, setApiStatus] = useState<string>("")
   const [workingModel, setWorkingModel] = useState<string>("")
+  const [autoAnalysis, setAutoAnalysis] = useState<string>("")
+  const [isAutoAnalyzing, setIsAutoAnalyzing] = useState(false)
 
   const runDebug = async () => {
     console.log("🔍 Chạy debug...")
@@ -32,6 +34,37 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     setApiStatus(`API Test: ${result.success ? "✅" : "❌"} ${result.message}`)
     if (result.workingModel) {
       setWorkingModel(result.workingModel)
+    }
+  }
+
+  // Function để AI tự động phân tích dữ liệu khi load xong
+  const performAutoAnalysis = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
+    if (data.length === 0) return
+
+    setIsAutoAnalyzing(true)
+    try {
+      console.log("🤖 Bắt đầu phân tích tự động...")
+
+      const context = `Bạn là một AI assistant chuyên phân tích dữ liệu. Dưới đây là toàn bộ dữ liệu từ bảng "${tableName}" trong Lark Base:
+
+${JSON.stringify(data, null, 2)}
+
+Hãy phân tích và tóm tắt dữ liệu này một cách chi tiết, bao gồm:
+1. Tổng quan về dữ liệu (số lượng records, các trường dữ liệu)
+2. Phân tích nội dung chính
+3. Các thống kê quan trọng
+4. Nhận xét và đánh giá
+
+Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`
+
+      const analysis = await askAI(context, "Hãy phân tích toàn bộ dữ liệu này cho tôi.")
+      setAutoAnalysis(analysis)
+      console.log("✅ Hoàn thành phân tích tự động")
+    } catch (err) {
+      console.error("❌ Lỗi khi phân tích tự động:", err)
+      setAutoAnalysis("❌ Không thể thực hiện phân tích tự động. Vui lòng thử hỏi AI thủ công.")
+    } finally {
+      setIsAutoAnalyzing(false)
     }
   }
 
@@ -62,6 +95,10 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
         if (data.length === 0) {
           setError("Bảng không có dữ liệu hoặc không thể đọc được records. Hãy thử debug để xem chi tiết.")
+        } else {
+          // Tự động phân tích dữ liệu khi load xong
+          console.log("🚀 Bắt đầu phân tích tự động...")
+          await performAutoAnalysis(data)
         }
       } catch (err) {
         console.error("❌ Lỗi khi lấy dữ liệu bảng:", err)
@@ -75,7 +112,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     if (tableId) {
       loadData()
     }
-  }, [tableId])
+  }, [tableId, tableName])
 
   const handleAskQuestion = async () => {
     if (!question.trim() || tableData.length === 0) return
@@ -86,17 +123,16 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     try {
       console.log("🤖 Bắt đầu xử lý câu hỏi...")
 
-      // Tạo context với dữ liệu rút gọn nếu cần
-      const dataPreview = tableData.slice(0, 5) // Chỉ lấy 5 records đầu tiên
-      const context = `Bạn là một AI assistant thông minh. Dưới đây là dữ liệu từ bảng "${tableName}" trong Lark Base:
+      // Sử dụng toàn bộ dữ liệu cho context (không giới hạn)
+      const context = `Bạn là một AI assistant thông minh. Dưới đây là TOÀN BỘ dữ liệu từ bảng "${tableName}" trong Lark Base:
 
-${JSON.stringify(dataPreview, null, 2)}
+${JSON.stringify(tableData, null, 2)}
 
-${tableData.length > 5 ? `\n(Hiển thị 5/${tableData.length} records đầu tiên)` : ""}
+Tổng cộng có ${tableData.length} records trong bảng.
 
 Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùng một cách chính xác và hữu ích. Trả lời bằng tiếng Việt.`
 
-      console.log("📝 Context được tạo, độ dài:", context.length)
+      console.log("📝 Context được tạo với toàn bộ dữ liệu, độ dài:", context.length)
 
       const response = await askAI(context, question)
       setAnswer(response)
@@ -110,12 +146,23 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
     }
   }
 
+  const refreshAnalysis = async () => {
+    if (tableData.length > 0) {
+      await performAutoAnalysis(tableData)
+    }
+  }
+
   if (loading) {
     return (
       <div>
         <div>🔄 Đang tải dữ liệu từ bảng &quot;{tableName}&quot;...</div>
         {sdkStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>{sdkStatus}</div>}
         {apiStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>{apiStatus}</div>}
+        {isAutoAnalyzing && (
+          <div style={{ fontSize: "12px", color: "#007acc", marginTop: "5px" }}>
+            🤖 Đang phân tích dữ liệu tự động...
+          </div>
+        )}
       </div>
     )
   }
@@ -156,6 +203,31 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
         </div>
       )}
 
+      {/* Phần phân tích tự động */}
+      {(autoAnalysis || isAutoAnalyzing) && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "15px",
+            backgroundColor: "#e8f4fd",
+            borderRadius: "6px",
+            border: "1px solid #007acc",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+            <h3 style={{ margin: 0 }}>🤖 Phân tích tự động</h3>
+            <button onClick={refreshAnalysis} disabled={isAutoAnalyzing} style={{ fontSize: "12px" }}>
+              {isAutoAnalyzing ? "🔄 Đang phân tích..." : "🔄 Phân tích lại"}
+            </button>
+          </div>
+          {isAutoAnalyzing ? (
+            <div>🤖 Đang phân tích toàn bộ dữ liệu bảng...</div>
+          ) : (
+            <div style={{ whiteSpace: "pre-wrap" }}>{autoAnalysis}</div>
+          )}
+        </div>
+      )}
+
       <div style={{ marginBottom: "20px" }}>
         <h3>📋 Dữ liệu bảng ({tableData.length} bản ghi):</h3>
         {tableData.length === 0 ? (
@@ -167,20 +239,25 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
             </button>
           </div>
         ) : (
-          <pre
-            style={{
-              whiteSpace: "pre-wrap",
-              backgroundColor: "#f9f9f9",
-              padding: "10px",
-              borderRadius: "6px",
-              maxHeight: "300px",
-              overflow: "auto",
-              fontSize: "12px",
-            }}
-          >
-            {JSON.stringify(tableData.slice(0, 3), null, 2)}
-            {tableData.length > 3 && `\n\n... và ${tableData.length - 3} records khác`}
-          </pre>
+          <details>
+            <summary style={{ cursor: "pointer", padding: "10px", backgroundColor: "#f9f9f9", borderRadius: "6px" }}>
+              📊 Xem dữ liệu chi tiết ({tableData.length} records) - Click để mở/đóng
+            </summary>
+            <pre
+              style={{
+                whiteSpace: "pre-wrap",
+                backgroundColor: "#f9f9f9",
+                padding: "10px",
+                borderRadius: "6px",
+                maxHeight: "400px",
+                overflow: "auto",
+                fontSize: "11px",
+                marginTop: "10px",
+              }}
+            >
+              {JSON.stringify(tableData, null, 2)}
+            </pre>
+          </details>
         )}
       </div>
 
@@ -188,14 +265,13 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
         <div>
           <h3>🤖 Hỏi AI về dữ liệu:</h3>
           <div style={{ marginBottom: "10px", fontSize: "12px", color: "#666" }}>
-            💡 Mẹo: Hãy hỏi cụ thể như &quot;Tổng hợp dữ liệu&quot;, &quot;Phân tích xu hướng&quot;, &quot;Thống kê số
-            liệu&quot;
-            <br />🤖 Models khả dụng: {getAvailableModels().join(", ")}
+            💡 AI đã đọc toàn bộ {tableData.length} records. Bạn có thể hỏi bất kỳ câu hỏi nào về dữ liệu!
+            <br />🔍 Ví dụ: &quot;Phân tích theo phòng ban&quot;, &quot;Thống kê tài sản&quot;, &quot;Tìm xu hướng&quot;
           </div>
           <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ví dụ: Tổng hợp dữ liệu này cho tôi, hoặc phân tích xu hướng..."
+            placeholder="Ví dụ: Phân tích dữ liệu theo phòng ban, thống kê tài sản, tìm các mẫu dữ liệu..."
             rows={3}
             style={{ width: "100%", marginBottom: "10px" }}
           />
@@ -205,6 +281,9 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
             </button>
             <button onClick={testAPI} style={{ marginLeft: "10px", fontSize: "12px" }}>
               🧪 Test API
+            </button>
+            <button onClick={refreshAnalysis} style={{ marginLeft: "10px", fontSize: "12px" }}>
+              🔄 Phân tích lại
             </button>
           </div>
 
