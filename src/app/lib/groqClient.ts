@@ -7,11 +7,11 @@ const groq = new Groq({
 
 // Danh sách các model khả dụng (theo thứ tự ưu tiên)
 const AVAILABLE_MODELS = [
+  "mixtral-8x7b-32768",
   "llama-3.3-70b-versatile", // Model có context length lớn nhất
   "llama-3.1-8b-instant",
   "llama3-70b-8192",
   "llama3-8b-8192",
-  "mixtral-8x7b-32768",
   "gemma-7b-it",
 ]
 
