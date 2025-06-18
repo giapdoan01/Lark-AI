@@ -43,7 +43,7 @@ const tryWithDifferentModels = async (messages: any[], currentModelIndex = 0): P
     })
 
     const response = chatCompletion.choices[0].message.content
-    console.log(`✅ Model ${model} hoạt động thành công`)
+    console.log(`✅ Model ${model} hoạt động th��nh công`)
     return response || "Không có câu trả lời từ AI."
   } catch (error) {
     console.log(`❌ Model ${model} thất bại:`, error)

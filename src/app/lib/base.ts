@@ -5,111 +5,11 @@ export interface TableRecord extends Record<string, unknown> {
   fields: Record<string, unknown>
 }
 
-// Phương pháp chính - sử dụng API đúng như code mẫu của bạn
+// Function lấy TẤT CẢ dữ liệu với pagination
 export const getTableData = async (tableId: string): Promise<TableRecord[]> => {
   try {
-    console.log("🚀 === GETTING TABLE DATA WITH CORRECT API ===")
+    console.log("🚀 === GETTING ALL TABLE DATA WITH PAGINATION ===")
     const table = await bitable.base.getTableById(tableId)
-
-    // Lấy metadata của các fields
-    const fieldMetaList = await table.getFieldMetaList()
-    console.log("📊 Field metadata:", fieldMetaList)
-
-    // Tạo map tên cột → ID cột (như trong code mẫu của bạn)
-    const fieldMap: Record<string, string> = {}
-    for (const field of fieldMetaList) {
-      fieldMap[field.name] = field.id
-    }
-    console.log("🗺️ Field map:", fieldMap)
-
-    // Lấy dữ liệu bằng getRecords (như code mẫu của bạn)
-    console.log("📥 Getting records with getRecords...")
-    const result = await table.getRecords({ pageSize: 1000 })
-    const allRecords = result.records
-    console.log(`📊 Found ${allRecords.length} records`)
-
-    if (allRecords.length === 0) {
-      console.log("⚠️ No records found")
-      return []
-    }
-
-    const processedRecords: TableRecord[] = []
-
-    // Xử lý từng record
-    for (const record of allRecords) {
-      console.log(`📝 Processing record: ${record.recordId}`)
-      const fields: Record<string, unknown> = {}
-
-      // Lấy giá trị từng field bằng table.getCellValue (như code mẫu của bạn)
-      for (const fieldMeta of fieldMetaList) {
-        try {
-          const cellValue = await table.getCellValue(fieldMeta.id, record.recordId)
-
-          // Xử lý giá trị như trong code mẫu của bạn
-          let processedValue = cellValue
-          if (cellValue && typeof cellValue === "object" && (cellValue as any).text) {
-            processedValue = (cellValue as any).text
-          }
-
-          fields[fieldMeta.name] = processedValue
-
-          // Log chi tiết cho record đầu tiên
-          if (processedRecords.length === 0) {
-            console.log(`  📊 Field "${fieldMeta.name}": ${JSON.stringify(processedValue)}`)
-          }
-        } catch (cellError) {
-          console.warn(`⚠️ Cannot get field ${fieldMeta.name}:`, cellError)
-          fields[fieldMeta.name] = null
-        }
-      }
-
-      processedRecords.push({
-        recordId: record.recordId,
-        fields: fields,
-      })
-
-      // Log record đầu tiên để debug
-      if (processedRecords.length === 1) {
-        console.log("📊 First record sample:", JSON.stringify(processedRecords[0], null, 2))
-      }
-
-      // Giới hạn để tránh quá tải (có thể tăng sau)
-      if (processedRecords.length >= 100) {
-        console.log("⚠️ Limited to 100 records for performance")
-        break
-      }
-    }
-
-    console.log(`✅ Successfully processed ${processedRecords.length} records`)
-
-    // Kiểm tra xem có dữ liệu thực không
-    const hasRealData = processedRecords.some((record) => {
-      return Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== "")
-    })
-
-    console.log(`📊 Has real data: ${hasRealData}`)
-
-    if (hasRealData) {
-      console.log("✅ SUCCESS: Found records with real data!")
-      return processedRecords
-    } else {
-      console.log("⚠️ WARNING: All fields are null/empty")
-      return processedRecords // Vẫn trả về để debug
-    }
-  } catch (error) {
-    console.error("❌ getTableData failed:", error)
-    throw error
-  }
-}
-
-// Phương pháp backup - sử dụng getActiveTable nếu có thể
-export const getActiveTableData = async (): Promise<TableRecord[]> => {
-  try {
-    console.log("🚀 === TRYING ACTIVE TABLE METHOD ===")
-
-    // Thử lấy active table
-    const table = await bitable.base.getActiveTable()
-    console.log("📋 Got active table:", table)
 
     // Lấy metadata của các fields
     const fieldMetaList = await table.getFieldMetaList()
@@ -120,15 +20,150 @@ export const getActiveTableData = async (): Promise<TableRecord[]> => {
     for (const field of fieldMetaList) {
       fieldMap[field.name] = field.id
     }
+    console.log("🗺️ Field map:", fieldMap)
 
-    // Lấy dữ liệu
-    const result = await table.getRecords({ pageSize: 1000 })
-    const allRecords = result.records
-    console.log(`📊 Found ${allRecords.length} records`)
+    const allProcessedRecords: TableRecord[] = []
+    let pageToken: string | undefined = undefined
+    let pageNumber = 1
+    const pageSize = 1000 // Kích thước trang tối đa
+
+    // Lặp qua tất cả các trang
+    do {
+      console.log(`📄 Đang lấy trang ${pageNumber}...`)
+
+      // Tạo options cho getRecords
+      const options: any = { pageSize }
+      if (pageToken) {
+        options.pageToken = pageToken
+      }
+
+      // Lấy dữ liệu trang hiện tại
+      const result = await table.getRecords(options)
+      const currentPageRecords = result.records
+
+      console.log(`📊 Trang ${pageNumber}: ${currentPageRecords.length} records`)
+
+      // Xử lý từng record trong trang hiện tại
+      for (const record of currentPageRecords) {
+        const fields: Record<string, unknown> = {}
+
+        // Lấy giá trị từng field
+        for (const fieldMeta of fieldMetaList) {
+          try {
+            const cellValue = await table.getCellValue(fieldMeta.id, record.recordId)
+
+            // Xử lý giá trị như trong code mẫu
+            let processedValue = cellValue
+            if (cellValue && typeof cellValue === "object" && (cellValue as any).text) {
+              processedValue = (cellValue as any).text
+            }
+
+            fields[fieldMeta.name] = processedValue
+          } catch (cellError) {
+            console.warn(`⚠️ Cannot get field ${fieldMeta.name} for record ${record.recordId}:`, cellError)
+            fields[fieldMeta.name] = null
+          }
+        }
+
+        allProcessedRecords.push({
+          recordId: record.recordId,
+          fields: fields,
+        })
+      }
+
+      // Cập nhật pageToken cho trang tiếp theo
+      pageToken = result.hasMore ? result.pageToken : undefined
+      pageNumber++
+
+      // Log tiến trình
+      console.log(`📊 Đã xử lý: ${allProcessedRecords.length} records tổng cộng`)
+
+      // Kiểm tra xem còn trang nào không
+      if (result.hasMore) {
+        console.log(`➡️ Còn dữ liệu, tiếp tục trang ${pageNumber}...`)
+      } else {
+        console.log(`✅ Đã lấy hết tất cả dữ liệu!`)
+      }
+    } while (pageToken) // Tiếp tục nếu còn pageToken
+
+    console.log(`🎉 HOÀN THÀNH: Đã lấy tổng cộng ${allProcessedRecords.length} records từ ${pageNumber - 1} trang`)
+
+    // Kiểm tra xem có dữ liệu thực không
+    const hasRealData = allProcessedRecords.some((record) => {
+      return Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== "")
+    })
+
+    console.log(`📊 Has real data: ${hasRealData}`)
+
+    // Log sample data từ record đầu tiên
+    if (allProcessedRecords.length > 0) {
+      console.log("📊 First record sample:", JSON.stringify(allProcessedRecords[0], null, 2))
+    }
+
+    if (hasRealData) {
+      console.log("✅ SUCCESS: Found records with real data!")
+      return allProcessedRecords
+    } else {
+      console.log("⚠️ WARNING: All fields are null/empty")
+      return allProcessedRecords // Vẫn trả về để debug
+    }
+  } catch (error) {
+    console.error("❌ getTableData failed:", error)
+    throw error
+  }
+}
+
+// Function lấy thống kê tổng quan về bảng
+export const getTableStats = async (tableId: string) => {
+  try {
+    console.log("📊 === GETTING TABLE STATISTICS ===")
+    const table = await bitable.base.getTableById(tableId)
+
+    // Lấy tổng số records
+    const recordIds = await table.getRecordIdList()
+    const totalRecords = recordIds.length
+
+    // Lấy field metadata
+    const fieldMetaList = await table.getFieldMetaList()
+    const totalFields = fieldMetaList.length
+
+    console.log(`📊 Table Statistics:`)
+    console.log(`  - Total Records: ${totalRecords}`)
+    console.log(`  - Total Fields: ${totalFields}`)
+    console.log(`  - Fields:`)
+    fieldMetaList.forEach((field, index) => {
+      console.log(`    ${index + 1}. ${field.name} (${field.type})`)
+    })
+
+    return {
+      totalRecords,
+      totalFields,
+      fields: fieldMetaList.map((f) => ({ name: f.name, type: f.type, id: f.id })),
+    }
+  } catch (error) {
+    console.error("❌ getTableStats failed:", error)
+    throw error
+  }
+}
+
+// Function test với sample nhỏ trước khi lấy hết
+export const testTableDataSample = async (tableId: string, sampleSize = 5): Promise<TableRecord[]> => {
+  try {
+    console.log(`🧪 === TESTING WITH ${sampleSize} SAMPLE RECORDS ===`)
+    const table = await bitable.base.getTableById(tableId)
+
+    // Lấy metadata của các fields
+    const fieldMetaList = await table.getFieldMetaList()
+    console.log("📊 Field metadata:", fieldMetaList)
+
+    // Lấy sample records
+    const result = await table.getRecords({ pageSize: sampleSize })
+    const sampleRecords = result.records
+    console.log(`📊 Sample: ${sampleRecords.length} records`)
 
     const processedRecords: TableRecord[] = []
 
-    for (const record of allRecords) {
+    for (const record of sampleRecords) {
       const fields: Record<string, unknown> = {}
 
       for (const fieldMeta of fieldMetaList) {
@@ -151,13 +186,12 @@ export const getActiveTableData = async (): Promise<TableRecord[]> => {
         recordId: record.recordId,
         fields: fields,
       })
-
-      if (processedRecords.length >= 100) break
     }
 
+    console.log("🧪 Sample data:", JSON.stringify(processedRecords, null, 2))
     return processedRecords
   } catch (error) {
-    console.error("❌ getActiveTableData failed:", error)
+    console.error("❌ testTableDataSample failed:", error)
     throw error
   }
 }
@@ -175,8 +209,8 @@ export const debugTableStructure = async (tableId: string) => {
       console.log(`  ${index + 1}. "${field.name}" (ID: ${field.id}, Type: ${field.type})`)
     })
 
-    // Debug records
-    const result = await table.getRecords({ pageSize: 5 }) // Chỉ lấy 5 records để test
+    // Debug records với sample nhỏ
+    const result = await table.getRecords({ pageSize: 3 }) // Chỉ lấy 3 records để test
     console.log(`📝 Sample records (${result.records.length}):`)
 
     for (const record of result.records) {
@@ -192,6 +226,11 @@ export const debugTableStructure = async (tableId: string) => {
         }
       }
     }
+
+    // Kiểm tra pagination info
+    console.log(`\n📄 Pagination info:`)
+    console.log(`  - hasMore: ${result.hasMore}`)
+    console.log(`  - pageToken: ${result.pageToken}`)
 
     console.log("🔍 === END DEBUG ===")
   } catch (error) {
@@ -219,6 +258,7 @@ export const testTableAccess = async (tableId: string) => {
     // Lấy records
     const result = await table.getRecords({ pageSize: 10 })
     console.log(`📝 Found ${result.records.length} records`)
+    console.log(`📄 Has more pages: ${result.hasMore}`)
 
     // Test lấy data từ record đầu tiên
     if (result.records.length > 0) {

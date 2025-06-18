@@ -1,6 +1,13 @@
 "use client"
 import { useEffect, useState } from "react"
-import { getTableData, checkSDKStatus, debugTableStructure } from "../lib/base"
+import {
+  getTableData,
+  getTableStats,
+  testTableDataSample,
+  checkSDKStatus,
+  debugTableStructure,
+  testTableAccess,
+} from "../lib/base"
 import { askAI, testGroqAPI } from "../lib/groqClient"
 
 interface ChatBotProps {
@@ -21,6 +28,8 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [workingModel, setWorkingModel] = useState<string>("")
   const [autoAnalysis, setAutoAnalysis] = useState<string>("")
   const [isAutoAnalyzing, setIsAutoAnalyzing] = useState(false)
+  const [tableStats, setTableStats] = useState<any>(null)
+  const [loadingProgress, setLoadingProgress] = useState<string>("")
 
   const runDebug = async () => {
     console.log("🔍 Chạy detailed debug...")
@@ -37,12 +46,41 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     }
   }
 
-  // Thêm function test mới vào component
-  const testTableAccess = async () => {
+  const testTableAccessFunc = async () => {
     console.log("🧪 Testing table access...")
-    // const result = await testTableAccess(tableId) // Assuming testTableAccess is defined elsewhere and takes tableId
-    const result = true // Placeholder, replace with actual test
+    const result = await testTableAccess(tableId)
     setDebugInfo(`Table access test: ${result ? "✅ Success" : "❌ Failed"} - Check console for details`)
+  }
+
+  const testSample = async () => {
+    console.log("🧪 Testing with sample data...")
+    try {
+      const sampleData = await testTableDataSample(tableId, 5)
+      setDebugInfo(`Sample test: ✅ Got ${sampleData.length} records - Check console for details`)
+    } catch (err) {
+      setDebugInfo(`Sample test: ❌ Failed - ${err}`)
+    }
+  }
+
+  const loadAllData = async () => {
+    console.log("📥 Loading ALL data...")
+    setLoading(true)
+    setLoadingProgress("Đang lấy tất cả dữ liệu...")
+
+    try {
+      const data = await getTableData(tableId)
+      setTableData(data)
+      setLoadingProgress("")
+
+      if (data.length > 0) {
+        await performAutoAnalysis(data)
+      }
+    } catch (err) {
+      console.error("❌ Error loading all data:", err)
+      setError(`Lỗi khi lấy tất cả dữ liệu: ${err}`)
+    } finally {
+      setLoading(false)
+    }
   }
 
   // Function để AI tự động phân tích dữ liệu khi load xong
@@ -50,7 +88,10 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     if (data.length === 0) return
 
     // Kiểm tra xem có dữ liệu thực không
-    const hasRealData = data.some((record) => Object.keys(record.fields).length > 0)
+    const hasRealData = data.some((record) =>
+      Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
+    )
+
     if (!hasRealData) {
       setAutoAnalysis("⚠️ Dữ liệu chỉ có recordId mà không có thông tin chi tiết fields. Cần debug để khắc phục.")
       return
@@ -60,7 +101,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     try {
       console.log("🤖 Bắt đầu phân tích tự động...")
 
-      const context = `Bạn là một AI assistant chuyên phân tích dữ liệu. Dưới đây là toàn bộ dữ liệu từ bảng "${tableName}" trong Lark Base:
+      const context = `Bạn là một AI assistant chuyên phân tích dữ liệu. Dưới đây là TOÀN BỘ dữ liệu từ bảng "${tableName}" trong Lark Base (${data.length} records):
 
 ${JSON.stringify(data, null, 2)}
 
@@ -101,8 +142,15 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`
         // Test API
         await testAPI()
 
-        // Lấy dữ liệu bảng với methods mới
-        console.log("📥 Bắt đầu lấy dữ liệu bảng với methods cải tiến...")
+        // Lấy thống kê bảng trước
+        setLoadingProgress("Đang lấy thống kê bảng...")
+        const stats = await getTableStats(tableId)
+        setTableStats(stats)
+        console.log("📊 Table stats:", stats)
+
+        // Lấy TẤT CẢ dữ liệu bảng
+        setLoadingProgress(`Đang lấy tất cả ${stats.totalRecords} records...`)
+        console.log("📥 Bắt đầu lấy TẤT CẢ dữ liệu bảng...")
         const data = await getTableData(tableId)
         console.log("✅ Kết quả cuối cùng:", data)
 
@@ -112,11 +160,14 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`
           setError("Bảng không có dữ liệu hoặc không thể đọc được records. Hãy thử debug để xem chi tiết.")
         } else {
           // Kiểm tra xem có dữ liệu thực không
-          const hasRealData = data.some((record) => Object.keys(record.fields).length > 0)
+          const hasRealData = data.some((record) =>
+            Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
+          )
 
           if (hasRealData) {
             // Tự động phân tích dữ liệu khi load xong
             console.log("🚀 Bắt đầu phân tích tự động...")
+            setLoadingProgress("Đang phân tích dữ liệu bằng AI...")
             await performAutoAnalysis(data)
           } else {
             setError("Đã lấy được records nhưng không có thông tin chi tiết fields. Vui lòng chạy debug để khắc phục.")
@@ -128,6 +179,7 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`
         setError(`Lỗi: ${errorMessage}`)
       } finally {
         setLoading(false)
+        setLoadingProgress("")
       }
     }
 
@@ -178,9 +230,14 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
     return (
       <div>
         <div>🔄 Đang tải dữ liệu từ bảng &quot;{tableName}&quot;...</div>
-        <div style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>
-          🔧 Đang thử nhiều phương pháp để lấy dữ liệu chi tiết...
-        </div>
+        {tableStats && (
+          <div style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>
+            📊 Bảng có {tableStats.totalRecords} records và {tableStats.totalFields} fields
+          </div>
+        )}
+        {loadingProgress && (
+          <div style={{ fontSize: "12px", color: "#007acc", marginTop: "5px" }}>{loadingProgress}</div>
+        )}
         {sdkStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>{sdkStatus}</div>}
         {apiStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>{apiStatus}</div>}
         {isAutoAnalyzing && (
@@ -200,6 +257,11 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
         {sdkStatus && <div>✅ {sdkStatus}</div>}
         {apiStatus && <div>{apiStatus}</div>}
         {workingModel && <div>🤖 Đang sử dụng model: {workingModel}</div>}
+        {tableStats && (
+          <div>
+            📊 Thống kê: {tableStats.totalRecords} records, {tableStats.totalFields} fields
+          </div>
+        )}
       </div>
 
       {error && (
@@ -220,8 +282,14 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
             <button onClick={testAPI} style={{ marginRight: "10px", fontSize: "12px" }}>
               🧪 Test API
             </button>
-            <button onClick={testTableAccess} style={{ marginRight: "10px", fontSize: "12px" }}>
+            <button onClick={testTableAccessFunc} style={{ marginRight: "10px", fontSize: "12px" }}>
               🧪 Test Access
+            </button>
+            <button onClick={testSample} style={{ marginRight: "10px", fontSize: "12px" }}>
+              🧪 Test Sample
+            </button>
+            <button onClick={loadAllData} style={{ marginRight: "10px", fontSize: "12px" }}>
+              📥 Load All Data
             </button>
             <button onClick={() => window.location.reload()} style={{ fontSize: "12px" }}>
               🔄 Thử lại
@@ -249,7 +317,7 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
             </button>
           </div>
           {isAutoAnalyzing ? (
-            <div>🤖 Đang phân tích toàn bộ dữ liệu bảng...</div>
+            <div>🤖 Đang phân tích toàn bộ {tableData.length} records...</div>
           ) : (
             <div style={{ whiteSpace: "pre-wrap" }}>{autoAnalysis}</div>
           )}
@@ -262,8 +330,11 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
           <div style={{ padding: "20px", backgroundColor: "#f9f9f9", borderRadius: "6px", textAlign: "center" }}>
             <p>⚠️ Không có dữ liệu để hiển thị</p>
             <p style={{ fontSize: "12px", color: "#666" }}>Có thể bảng trống hoặc có vấn đề với quyền truy cập</p>
-            <button onClick={runDebug} style={{ fontSize: "12px" }}>
+            <button onClick={runDebug} style={{ fontSize: "12px", marginRight: "10px" }}>
               🔍 Detailed Debug
+            </button>
+            <button onClick={testSample} style={{ fontSize: "12px" }}>
+              🧪 Test Sample
             </button>
           </div>
         ) : (
@@ -316,6 +387,9 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
             </button>
             <button onClick={runDebug} style={{ marginLeft: "10px", fontSize: "12px" }}>
               🔍 Debug
+            </button>
+            <button onClick={loadAllData} style={{ marginLeft: "10px", fontSize: "12px" }}>
+              📥 Reload All
             </button>
           </div>
 
