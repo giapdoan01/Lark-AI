@@ -8,7 +8,7 @@ import {
   debugTableStructure,
   testTableAccess,
 } from "../lib/base"
-import { askAI, testGroqAPI } from "../lib/groqClient"
+import { askAIWithChunks, testGroqAPI } from "../lib/groqClient"
 
 interface ChatBotProps {
   tableId: string
@@ -83,7 +83,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     }
   }
 
-  // Function để AI tự động phân tích dữ liệu khi load xong
+  // Function để AI tự động phân tích dữ liệu khi load xong - SỬ DỤNG CHUNKS
   const performAutoAnalysis = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
     if (data.length === 0) return
 
@@ -99,21 +99,22 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
     setIsAutoAnalyzing(true)
     try {
-      console.log("🤖 Bắt đầu phân tích tự động...")
+      console.log(`🤖 Bắt đầu phân tích tự động với ${data.length} records...`)
 
-      const context = `Bạn là một AI assistant chuyên phân tích dữ liệu. Dưới đây là TOÀN BỘ dữ liệu từ bảng "${tableName}" trong Lark Base (${data.length} records):
-
-${JSON.stringify(data, null, 2)}
-
-Hãy phân tích và tóm tắt dữ liệu này một cách chi tiết, bao gồm:
+      // SỬ DỤNG askAIWithChunks thay vì askAI thông thường
+      const analysis = await askAIWithChunks(
+        data,
+        tableName,
+        `Hãy phân tích toàn bộ dữ liệu này cho tôi một cách chi tiết, bao gồm:
 1. Tổng quan về dữ liệu (số lượng records, các trường dữ liệu)
-2. Phân tích nội dung chính
+2. Phân tích nội dung chính và xu hướng
 3. Các thống kê quan trọng
 4. Nhận xét và đánh giá
+5. Những điểm đáng chú ý
 
-Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`
+Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`,
+      )
 
-      const analysis = await askAI(context, "Hãy phân tích toàn bộ dữ liệu này cho tôi.")
       setAutoAnalysis(analysis)
       console.log("✅ Hoàn thành phân tích tự động")
     } catch (err) {
@@ -167,7 +168,7 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`
           if (hasRealData) {
             // Tự động phân tích dữ liệu khi load xong
             console.log("🚀 Bắt đầu phân tích tự động...")
-            setLoadingProgress("Đang phân tích dữ liệu bằng AI...")
+            setLoadingProgress(`Đang phân tích ${data.length} records bằng AI...`)
             await performAutoAnalysis(data)
           } else {
             setError("Đã lấy được records nhưng không có thông tin chi tiết fields. Vui lòng chạy debug để khắc phục.")
@@ -197,18 +198,8 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`
     try {
       console.log("🤖 Bắt đầu xử lý câu hỏi...")
 
-      // Sử dụng toàn bộ dữ liệu cho context
-      const context = `Bạn là một AI assistant thông minh. Dưới đây là TOÀN BỘ dữ liệu từ bảng "${tableName}" trong Lark Base:
-
-${JSON.stringify(tableData, null, 2)}
-
-Tổng cộng có ${tableData.length} records trong bảng.
-
-Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùng một cách chính xác và hữu ích. Trả lời bằng tiếng Việt.`
-
-      console.log("📝 Context được tạo với toàn bộ dữ liệu, độ dài:", context.length)
-
-      const response = await askAI(context, question)
+      // SỬ DỤNG askAIWithChunks để đảm bảo AI nhận được TẤT CẢ dữ liệu
+      const response = await askAIWithChunks(tableData, tableName, question)
       setAnswer(response)
       console.log("✅ Đã nhận được câu trả lời từ AI")
     } catch (err) {
@@ -311,13 +302,13 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <h3 style={{ margin: 0 }}>🤖 Phân tích tự động</h3>
+            <h3 style={{ margin: 0 }}>🤖 Phân tích tự động (Toàn bộ {tableData.length} records)</h3>
             <button onClick={refreshAnalysis} disabled={isAutoAnalyzing} style={{ fontSize: "12px" }}>
               {isAutoAnalyzing ? "🔄 Đang phân tích..." : "🔄 Phân tích lại"}
             </button>
           </div>
           {isAutoAnalyzing ? (
-            <div>🤖 Đang phân tích toàn bộ {tableData.length} records...</div>
+            <div>🤖 Đang phân tích toàn bộ {tableData.length} records với AI thông minh...</div>
           ) : (
             <div style={{ whiteSpace: "pre-wrap" }}>{autoAnalysis}</div>
           )}
@@ -365,7 +356,8 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
         <div>
           <h3>🤖 Hỏi AI về dữ liệu:</h3>
           <div style={{ marginBottom: "10px", fontSize: "12px", color: "#666" }}>
-            💡 AI đã đọc toàn bộ {tableData.length} records với thông tin chi tiết. Bạn có thể hỏi bất kỳ câu hỏi nào!
+            💡 AI sẽ nhận được TOÀN BỘ {tableData.length} records với thông tin chi tiết thông qua hệ thống phân tích
+            thông minh!
             <br />🔍 Ví dụ: &quot;Phân tích theo phòng ban&quot;, &quot;Thống kê tài sản&quot;, &quot;Tìm xu hướng&quot;
           </div>
           <textarea
@@ -377,7 +369,7 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
           />
           <div style={{ marginBottom: "10px" }}>
             <button onClick={handleAskQuestion} disabled={isAsking || !question.trim()}>
-              {isAsking ? "🤔 Đang suy nghĩ..." : "🚀 Hỏi AI"}
+              {isAsking ? "🤔 Đang suy nghĩ..." : "🚀 Hỏi AI (Toàn bộ dữ liệu)"}
             </button>
             <button onClick={testAPI} style={{ marginLeft: "10px", fontSize: "12px" }}>
               🧪 Test API
@@ -403,7 +395,7 @@ Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùn
                 border: `1px solid ${answer.includes("❌") ? "#ff4444" : "#4caf50"}`,
               }}
             >
-              <h4>💡 Câu trả lời từ AI:</h4>
+              <h4>💡 Câu trả lời từ AI (Dựa trên {tableData.length} records):</h4>
               <div style={{ whiteSpace: "pre-wrap" }}>{answer}</div>
             </div>
           )}

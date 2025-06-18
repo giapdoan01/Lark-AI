@@ -15,8 +15,66 @@ const AVAILABLE_MODELS = [
   "gemma-7b-it",
 ]
 
-// Function để chia nhỏ dữ liệu nếu quá lớn
-const chunkData = (data: any[], maxChunkSize = 10): any[][] => {
+// Function để tạo summary thông minh của dữ liệu
+const createDataSummary = (data: any[]): string => {
+  if (data.length === 0) return "Không có dữ liệu"
+
+  // Lấy thông tin cơ bản
+  const totalRecords = data.length
+  const firstRecord = data[0]
+  const fieldNames = Object.keys(firstRecord.fields || {})
+
+  // Phân tích từng field
+  const fieldAnalysis: Record<string, any> = {}
+
+  fieldNames.forEach((fieldName) => {
+    const values = data
+      .map((record) => record.fields[fieldName])
+      .filter((v) => v !== null && v !== undefined && v !== "")
+    const uniqueValues = [...new Set(values)]
+
+    fieldAnalysis[fieldName] = {
+      totalValues: values.length,
+      uniqueValues: uniqueValues.length,
+      sampleValues: uniqueValues.slice(0, 5), // Lấy 5 giá trị mẫu
+      isEmpty: values.length === 0,
+    }
+  })
+
+  // Tạo summary
+  let summary = `=== TỔNG QUAN DỮ LIỆU ===
+Tổng số bản ghi: ${totalRecords}
+Số trường dữ liệu: ${fieldNames.length}
+
+=== PHÂN TÍCH CÁC TRƯỜNG ===
+`
+
+  fieldNames.forEach((fieldName) => {
+    const analysis = fieldAnalysis[fieldName]
+    summary += `
+📊 ${fieldName}:
+   - Có dữ liệu: ${analysis.totalValues}/${totalRecords} bản ghi
+   - Giá trị duy nhất: ${analysis.uniqueValues}
+   - Mẫu: ${JSON.stringify(analysis.sampleValues)}
+`
+  })
+
+  // Thêm một số records mẫu đầy đủ
+  summary += `\n=== MẪU DỮ LIỆU CHI TIẾT ===\n`
+  const sampleSize = Math.min(10, totalRecords)
+  for (let i = 0; i < sampleSize; i++) {
+    summary += `\nBản ghi ${i + 1}:\n${JSON.stringify(data[i], null, 2)}\n`
+  }
+
+  if (totalRecords > sampleSize) {
+    summary += `\n... và ${totalRecords - sampleSize} bản ghi khác với cấu trúc tương tự\n`
+  }
+
+  return summary
+}
+
+// Function để chia dữ liệu thành chunks thông minh
+const createIntelligentChunks = (data: any[], maxChunkSize = 15): any[][] => {
   const chunks = []
   for (let i = 0; i < data.length; i += maxChunkSize) {
     chunks.push(data.slice(i, i + maxChunkSize))
@@ -38,12 +96,12 @@ const tryWithDifferentModels = async (messages: any[], currentModelIndex = 0): P
       model: model,
       messages: messages,
       temperature: 0.7,
-      max_tokens: 2048, // Tăng max_tokens để có câu trả lời dài hơn
+      max_tokens: 3000, // Tăng max_tokens
       top_p: 1,
     })
 
     const response = chatCompletion.choices[0].message.content
-    console.log(`✅ Model ${model} hoạt động th��nh công`)
+    console.log(`✅ Model ${model} hoạt động thành công`)
     return response || "Không có câu trả lời từ AI."
   } catch (error) {
     console.log(`❌ Model ${model} thất bại:`, error)
@@ -70,56 +128,50 @@ export const askAI = async (context: string, question: string): Promise<string> 
     console.log("📝 Context length:", context.length)
     console.log("❓ Question:", question)
 
-    // Nếu context quá lớn, chia nhỏ và xử lý
-    if (context.length > 15000) {
-      console.log("⚠️ Context rất lớn, đang xử lý theo chunks...")
+    // Parse dữ liệu từ context để xử lý thông minh
+    let processedContext = context
+    let dataArray: any[] = []
 
-      // Trích xuất dữ liệu từ context
-      const dataMatch = context.match(
-        /Dưới đây là.*?dữ liệu từ bảng[^:]*:\s*([\s\S]*?)\s*(?:Tổng cộng có|Hãy phân tích)/,
-      )
+    // Tìm và extract dữ liệu JSON từ context
+    const dataMatch = context.match(
+      /Dưới đây là.*?dữ liệu từ bảng[^:]*:\s*([\s\S]*?)\s*(?:Tổng cộng có|Hãy phân tích)/i,
+    )
 
-      if (dataMatch) {
-        try {
-          const rawData = dataMatch[1]
-          const parsedData = JSON.parse(rawData)
+    if (dataMatch) {
+      try {
+        const rawData = dataMatch[1]
+        dataArray = JSON.parse(rawData)
+        console.log(`📊 Phát hiện ${dataArray.length} records trong context`)
 
-          // Chia dữ liệu thành chunks nhỏ hơn
-          const chunks = chunkData(parsedData, 20)
-          console.log(`📊 Chia dữ liệu thành ${chunks.length} chunks`)
+        // Nếu dữ liệu lớn, tạo summary thông minh
+        if (context.length > 20000 || dataArray.length > 20) {
+          console.log("🧠 Tạo summary thông minh cho dữ liệu lớn...")
 
-          // Xử lý chunk đầu tiên với context đầy đủ
-          const firstChunkContext = context.replace(
+          const intelligentSummary = createDataSummary(dataArray)
+
+          // Thay thế context với summary thông minh
+          processedContext = context.replace(
             rawData,
-            JSON.stringify(chunks[0], null, 2) + `\n\n(Đây là chunk 1/${chunks.length} của dữ liệu)`,
+            `${intelligentSummary}\n\n⚠️ Đây là tóm tắt thông minh của ${dataArray.length} bản ghi. AI có thể phân tích và trả lời dựa trên thông tin này.`,
           )
 
-          const messages = [
-            {
-              role: "system" as const,
-              content: firstChunkContext,
-            },
-            {
-              role: "user" as const,
-              content: question,
-            },
-          ]
-
-          return await tryWithDifferentModels(messages)
-        } catch (parseError) {
-          console.log("⚠️ Không thể parse dữ liệu, sử dụng context gốc rút gọn")
+          console.log("✅ Đã tạo summary thông minh, context length:", processedContext.length)
         }
+      } catch (parseError) {
+        console.log("⚠️ Không thể parse dữ liệu JSON, sử dụng context gốc")
       }
+    }
 
-      // Fallback: rút gọn context
-      const truncatedContext = context.substring(0, 12000) + "\n\n... (Dữ liệu đã được rút gọn do quá lớn)"
-      context = truncatedContext
+    // Nếu context vẫn quá lớn, cắt bớt
+    if (processedContext.length > 25000) {
+      console.log("⚠️ Context vẫn quá lớn, cắt bớt...")
+      processedContext = processedContext.substring(0, 22000) + "\n\n... (Dữ liệu đã được rút gọn do quá lớn)"
     }
 
     const messages = [
       {
         role: "system" as const,
-        content: context,
+        content: processedContext,
       },
       {
         role: "user" as const,
@@ -142,7 +194,7 @@ export const askAI = async (context: string, question: string): Promise<string> 
       } else if (error.message.includes("invalid_api_key")) {
         return "🔑 API key không hợp lệ. Vui lòng kiểm tra cấu hình."
       } else if (error.message.includes("context_length")) {
-        return "📏 Dữ liệu quá lớn để xử lý. Hãy thử với câu hỏi cụ thể hơn."
+        return "📏 Dữ liệu quá lớn để xử lý. Hãy thử với câu hỏi cụ thể hơn hoặc chia nhỏ dữ liệu."
       } else if (error.message.includes("network") || error.message.includes("fetch")) {
         return "🌐 Lỗi kết nối mạng. Vui lòng kiểm tra internet và thử lại."
       } else if (error.message.includes("Tất cả các model đều không khả dụng")) {
@@ -153,6 +205,40 @@ export const askAI = async (context: string, question: string): Promise<string> 
     }
 
     return "❌ Đã xảy ra lỗi không xác định khi gọi AI. Vui lòng thử lại."
+  }
+}
+
+// Function phân tích dữ liệu theo chunks
+export const askAIWithChunks = async (data: any[], tableName: string, question: string): Promise<string> => {
+  try {
+    console.log(`🧠 Phân tích dữ liệu theo chunks: ${data.length} records`)
+
+    if (data.length <= 20) {
+      // Nếu dữ liệu nhỏ, xử lý bình thường
+      const context = `Bạn là một AI assistant thông minh. Dưới đây là TOÀN BỘ dữ liệu từ bảng "${tableName}":
+
+${JSON.stringify(data, null, 2)}
+
+Tổng cộng có ${data.length} records trong bảng.`
+
+      return await askAI(context, question)
+    }
+
+    // Nếu dữ liệu lớn, sử dụng summary thông minh
+    const intelligentSummary = createDataSummary(data)
+
+    const context = `Bạn là một AI assistant thông minh chuyên phân tích dữ liệu. Dưới đây là tóm tắt thông minh của TOÀN BỘ dữ liệu từ bảng "${tableName}":
+
+${intelligentSummary}
+
+Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùng một cách chính xác và hữu ích. Trả lời bằng tiếng Việt.
+
+LưU Ý: Bạn đã nhận được thông tin tóm tắt của ${data.length} bản ghi đầy đủ, bao gồm phân tích từng trường dữ liệu và các mẫu dữ liệu chi tiết.`
+
+    return await askAI(context, question)
+  } catch (error) {
+    console.error("❌ askAIWithChunks failed:", error)
+    return `❌ Lỗi khi phân tích dữ liệu: ${error}`
   }
 }
 
