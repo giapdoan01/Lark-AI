@@ -8,7 +8,7 @@ import {
   debugTableStructure,
   testTableAccess,
 } from "../lib/base"
-import { askAIWithChunks, testGroqAPI } from "../lib/groqClient"
+import { askAIWithFullData, askAIWithRawData, testGroqAPI } from "../lib/groqClient"
 
 interface ChatBotProps {
   tableId: string
@@ -30,6 +30,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [isAutoAnalyzing, setIsAutoAnalyzing] = useState(false)
   const [tableStats, setTableStats] = useState<any>(null)
   const [loadingProgress, setLoadingProgress] = useState<string>("")
+  const [aiMode, setAiMode] = useState<"optimized" | "raw" | "chunks">("optimized")
 
   const runDebug = async () => {
     console.log("🔍 Chạy detailed debug...")
@@ -83,7 +84,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     }
   }
 
-  // Function để AI tự động phân tích dữ liệu khi load xong - SỬ DỤNG CHUNKS
+  // Function để AI tự động phân tích dữ liệu với mode khác nhau
   const performAutoAnalysis = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
     if (data.length === 0) return
 
@@ -99,21 +100,35 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
     setIsAutoAnalyzing(true)
     try {
-      console.log(`🤖 Bắt đầu phân tích tự động với ${data.length} records...`)
+      console.log(`🤖 Bắt đầu phân tích tự động với ${data.length} records (mode: ${aiMode})...`)
 
-      // SỬ DỤNG askAIWithChunks thay vì askAI thông thường
-      const analysis = await askAIWithChunks(
-        data,
-        tableName,
-        `Hãy phân tích toàn bộ dữ liệu này cho tôi một cách chi tiết, bao gồm:
-1. Tổng quan về dữ liệu (số lượng records, các trường dữ liệu)
-2. Phân tích nội dung chính và xu hướng
+      let analysis = ""
+
+      if (aiMode === "raw") {
+        analysis = await askAIWithRawData(
+          data,
+          tableName,
+          `Hãy phân tích toàn bộ ${data.length} records này một cách chi tiết. Đầu tiên hãy xác nhận rằng bạn đã nhận được tất cả ${data.length} bản ghi. Sau đó phân tích:
+1. Tổng quan về dữ liệu
+2. Phân tích nội dung chính
 3. Các thống kê quan trọng
 4. Nhận xét và đánh giá
-5. Những điểm đáng chú ý
 
-Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`,
-      )
+Trả lời bằng tiếng Việt.`,
+        )
+      } else {
+        analysis = await askAIWithFullData(
+          data,
+          tableName,
+          `Hãy phân tích toàn bộ ${data.length} records này một cách chi tiết. Đầu tiên hãy xác nhận rằng bạn đã nhận được tất cả ${data.length} bản ghi. Sau đó phân tích:
+1. Tổng quan về dữ liệu
+2. Phân tích nội dung chính
+3. Các thống kê quan trọng
+4. Nhận xét và đánh giá
+
+Trả lời bằng tiếng Việt.`,
+        )
+      }
 
       setAutoAnalysis(analysis)
       console.log("✅ Hoàn thành phân tích tự động")
@@ -198,8 +213,14 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`,
     try {
       console.log("🤖 Bắt đầu xử lý câu hỏi...")
 
-      // SỬ DỤNG askAIWithChunks để đảm bảo AI nhận được TẤT CẢ dữ liệu
-      const response = await askAIWithChunks(tableData, tableName, question)
+      let response = ""
+
+      if (aiMode === "raw") {
+        response = await askAIWithRawData(tableData, tableName, question)
+      } else {
+        response = await askAIWithFullData(tableData, tableName, question)
+      }
+
       setAnswer(response)
       console.log("✅ Đã nhận được câu trả lời từ AI")
     } catch (err) {
@@ -255,6 +276,45 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`,
         )}
       </div>
 
+      {/* AI Mode Selector */}
+      <div style={{ marginBottom: "15px", padding: "10px", backgroundColor: "#f0f8ff", borderRadius: "6px" }}>
+        <h4 style={{ margin: "0 0 10px 0" }}>🤖 Chế độ AI:</h4>
+        <div>
+          <label style={{ marginRight: "15px" }}>
+            <input
+              type="radio"
+              value="optimized"
+              checked={aiMode === "optimized"}
+              onChange={(e) => setAiMode(e.target.value as any)}
+            />
+            Tối ưu (Optimized)
+          </label>
+          <label style={{ marginRight: "15px" }}>
+            <input
+              type="radio"
+              value="raw"
+              checked={aiMode === "raw"}
+              onChange={(e) => setAiMode(e.target.value as any)}
+            />
+            Raw Data (Toàn bộ)
+          </label>
+          <label>
+            <input
+              type="radio"
+              value="chunks"
+              checked={aiMode === "chunks"}
+              onChange={(e) => setAiMode(e.target.value as any)}
+            />
+            Chunks (Từng phần)
+          </label>
+        </div>
+        <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>
+          {aiMode === "raw" && "🔥 Gửi toàn bộ dữ liệu thô - AI sẽ nhận được tất cả!"}
+          {aiMode === "optimized" && "⚡ Tối ưu dữ liệu - Nhanh và hiệu quả"}
+          {aiMode === "chunks" && "🧩 Chia nhỏ dữ liệu - Xử lý từng phần"}
+        </div>
+      </div>
+
       {error && (
         <div
           style={{
@@ -302,13 +362,17 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`,
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <h3 style={{ margin: 0 }}>🤖 Phân tích tự động (Toàn bộ {tableData.length} records)</h3>
+            <h3 style={{ margin: 0 }}>
+              🤖 Phân tích tự động ({aiMode} mode - {tableData.length} records)
+            </h3>
             <button onClick={refreshAnalysis} disabled={isAutoAnalyzing} style={{ fontSize: "12px" }}>
               {isAutoAnalyzing ? "🔄 Đang phân tích..." : "🔄 Phân tích lại"}
             </button>
           </div>
           {isAutoAnalyzing ? (
-            <div>🤖 Đang phân tích toàn bộ {tableData.length} records với AI thông minh...</div>
+            <div>
+              🤖 Đang phân tích toàn bộ {tableData.length} records với {aiMode} mode...
+            </div>
           ) : (
             <div style={{ whiteSpace: "pre-wrap" }}>{autoAnalysis}</div>
           )}
@@ -356,8 +420,7 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`,
         <div>
           <h3>🤖 Hỏi AI về dữ liệu:</h3>
           <div style={{ marginBottom: "10px", fontSize: "12px", color: "#666" }}>
-            💡 AI sẽ nhận được TOÀN BỘ {tableData.length} records với thông tin chi tiết thông qua hệ thống phân tích
-            thông minh!
+            💡 Chế độ {aiMode}: AI sẽ xử lý {tableData.length} records theo phương pháp đã chọn
             <br />🔍 Ví dụ: &quot;Phân tích theo phòng ban&quot;, &quot;Thống kê tài sản&quot;, &quot;Tìm xu hướng&quot;
           </div>
           <textarea
@@ -369,7 +432,7 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`,
           />
           <div style={{ marginBottom: "10px" }}>
             <button onClick={handleAskQuestion} disabled={isAsking || !question.trim()}>
-              {isAsking ? "🤔 Đang suy nghĩ..." : "🚀 Hỏi AI (Toàn bộ dữ liệu)"}
+              {isAsking ? "🤔 Đang suy nghĩ..." : `🚀 Hỏi AI (${aiMode} mode)`}
             </button>
             <button onClick={testAPI} style={{ marginLeft: "10px", fontSize: "12px" }}>
               🧪 Test API
@@ -395,7 +458,9 @@ Trả lời bằng tiếng Việt một cách chi tiết và dễ hiểu.`,
                 border: `1px solid ${answer.includes("❌") ? "#ff4444" : "#4caf50"}`,
               }}
             >
-              <h4>💡 Câu trả lời từ AI (Dựa trên {tableData.length} records):</h4>
+              <h4>
+                💡 Câu trả lời từ AI ({aiMode} mode - {tableData.length} records):
+              </h4>
               <div style={{ whiteSpace: "pre-wrap" }}>{answer}</div>
             </div>
           )}
