@@ -31,7 +31,7 @@ const createGroqClient = (apiKey: string): Groq => {
   })
 }
 
-// Function gửi request với 1 key cụ thể
+// Sửa function sendRequestWithKey để có retry logic tốt hơn
 const sendRequestWithKey = async (
   apiKey: string,
   keyIndex: number,
@@ -43,16 +43,21 @@ const sendRequestWithKey = async (
 
     const groq = createGroqClient(apiKey)
 
-    // Thử từng model cho đến khi thành công
+    // Thử từng model với timeout
     for (const model of AVAILABLE_MODELS) {
       try {
-        const chatCompletion = await groq.chat.completions.create({
-          model: model,
-          messages: messages,
-          temperature: 0.7,
-          max_tokens: 8000,
-          top_p: 1,
-        })
+        console.log(`🤖 Key ${keyIndex + 1} thử model: ${model}`)
+
+        const chatCompletion = (await Promise.race([
+          groq.chat.completions.create({
+            model: model,
+            messages: messages,
+            temperature: 0.7,
+            max_tokens: 6000, // Giảm max_tokens để tránh lỗi
+            top_p: 1,
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout after 30s")), 30000)),
+        ])) as any
 
         const response = chatCompletion.choices[0].message.content || "Không có phản hồi"
         console.log(`✅ Key ${keyIndex + 1} với model ${model}: Thành công`)
@@ -63,19 +68,26 @@ const sendRequestWithKey = async (
           keyIndex: keyIndex,
         }
       } catch (modelError) {
-        console.log(`❌ Key ${keyIndex + 1} với model ${model}: ${modelError}`)
+        const errorMsg = modelError instanceof Error ? modelError.message : String(modelError)
+        console.log(`❌ Key ${keyIndex + 1} với model ${model}: ${errorMsg}`)
+
+        // Nếu là rate limit, không thử model khác nữa
+        if (errorMsg.includes("rate_limit")) {
+          break
+        }
         continue
       }
     }
 
-    throw new Error("Tất cả models đều thất bại")
+    throw new Error("Tất cả models đều thất bại cho key này")
   } catch (error) {
-    console.error(`❌ Key ${keyIndex + 1} thất bại hoàn toàn:`, error)
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    console.error(`❌ Key ${keyIndex + 1} thất bại hoàn toàn: ${errorMsg}`)
     return {
       success: false,
       result: "",
       keyIndex: keyIndex,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMsg,
     }
   }
 }
@@ -194,7 +206,7 @@ Trả lời bằng tiếng Việt, ngắn gọn nhưng đầy đủ thông tin.`
   }
 }
 
-// Function trả lời câu hỏi dựa trên dữ liệu đã phân tích
+// Sửa function answerQuestionWithData để có fallback mechanism tốt hơn
 export const answerQuestionWithData = async (
   data: any[],
   tableName: string,
@@ -204,43 +216,83 @@ export const answerQuestionWithData = async (
   try {
     console.log(`🤔 Trả lời câu hỏi với ${data.length} records`)
 
-    // Chọn 1 key ngẫu nhiên để trả lời câu hỏi
-    const randomKeyIndex = Math.floor(Math.random() * API_KEYS.length)
-    const selectedKey = API_KEYS[randomKeyIndex]
-
-    console.log(`🔑 Sử dụng key ${randomKeyIndex + 1}/${API_KEYS.length} để trả lời câu hỏi`)
-
-    // Tạo context với toàn bộ dữ liệu + phân tích trước đó (nếu có)
-    let context = `Bạn là một AI assistant thông minh. Dưới đây là TOÀN BỘ dữ liệu từ bảng "${tableName}" (${data.length} records):
-
-${JSON.stringify(data, null, 1)}`
-
-    if (previousAnalysis) {
-      context += `\n\nPhân tích trước đó:\n${previousAnalysis}`
+    if (API_KEYS.length === 0) {
+      throw new Error("Không có API keys hợp lệ")
     }
 
-    context += `\n\nHãy dựa vào dữ liệu trên để trả lời câu hỏi một cách chính xác và chi tiết. Trả lời bằng tiếng Việt.`
+    // Thử tất cả keys thay vì chỉ 1 key ngẫu nhiên
+    const errors: string[] = []
 
-    const messages = [
-      {
-        role: "system",
-        content: context,
-      },
-      {
-        role: "user",
-        content: question,
-      },
-    ]
+    for (let keyIndex = 0; keyIndex < API_KEYS.length; keyIndex++) {
+      try {
+        const selectedKey = API_KEYS[keyIndex]
+        console.log(`🔑 Thử key ${keyIndex + 1}/${API_KEYS.length} để trả lời câu hỏi`)
 
-    const result = await sendRequestWithKey(selectedKey, randomKeyIndex, messages, "Trả lời câu hỏi")
+        // Tạo context với dữ liệu tối ưu để tránh context length quá lớn
+        const optimizedData = data.slice(0, 50) // Chỉ lấy 50 records đầu để tránh quá lớn
 
-    if (result.success) {
-      return result.result
-    } else {
-      throw new Error(result.error || "Không thể trả lời câu hỏi")
+        let context = `Bạn là một AI assistant thông minh. Dưới đây là dữ liệu từ bảng "${tableName}" (${data.length} records, hiển thị ${optimizedData.length} records đầu):
+
+${JSON.stringify(optimizedData, null, 1)}`
+
+        if (previousAnalysis) {
+          // Rút gọn previous analysis để tránh context quá dài
+          const shortAnalysis =
+            previousAnalysis.length > 2000
+              ? previousAnalysis.substring(0, 2000) + "...\n[Phân tích đã được rút gọn]"
+              : previousAnalysis
+          context += `\n\nPhân tích trước đó:\n${shortAnalysis}`
+        }
+
+        context += `\n\nLưu ý: Bảng có tổng cộng ${data.length} records. Hãy dựa vào dữ liệu mẫu và phân tích trước đó để trả lời câu hỏi một cách chính xác. Trả lời bằng tiếng Việt.`
+
+        const messages = [
+          {
+            role: "system",
+            content: context,
+          },
+          {
+            role: "user",
+            content: question,
+          },
+        ]
+
+        const result = await sendRequestWithKey(selectedKey, keyIndex, messages, "Trả lời câu hỏi")
+
+        if (result.success) {
+          console.log(`✅ Key ${keyIndex + 1} trả lời thành công`)
+          return result.result
+        } else {
+          errors.push(`Key ${keyIndex + 1}: ${result.error}`)
+          console.log(`❌ Key ${keyIndex + 1} thất bại: ${result.error}`)
+          continue
+        }
+      } catch (keyError) {
+        const errorMsg = keyError instanceof Error ? keyError.message : String(keyError)
+        errors.push(`Key ${keyIndex + 1}: ${errorMsg}`)
+        console.log(`❌ Key ${keyIndex + 1} exception: ${errorMsg}`)
+        continue
+      }
     }
+
+    // Nếu tất cả keys đều thất bại
+    throw new Error(`Tất cả ${API_KEYS.length} API keys đều thất bại:\n${errors.join("\n")}`)
   } catch (error) {
     console.error("❌ answerQuestionWithData failed:", error)
+
+    // Trả về thông tin chi tiết về lỗi
+    if (error instanceof Error && error.message.includes("Tất cả")) {
+      return `❌ **Tất cả API keys đều thất bại:**
+
+${error.message}
+
+**Khắc phục:**
+1. 🔑 Kiểm tra API keys có hợp lệ không
+2. ⏰ Chờ vài phút nếu bị rate limit
+3. 🔄 Thử test API keys trước
+4. 📝 Đặt câu hỏi ngắn gọn hơn`
+    }
+
     return `❌ Lỗi khi trả lời câu hỏi: ${error}`
   }
 }
@@ -300,6 +352,33 @@ export const testAllApiKeys = async (): Promise<{
     workingKeys: workingKeys,
     totalKeys: API_KEYS.length,
     keyDetails: results,
+  }
+}
+
+// Thêm function để test 1 key cụ thể
+const testSingleKey = async (apiKey: string, keyIndex: number): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const groq = createGroqClient(apiKey)
+
+    const testCompletion = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        {
+          role: "user",
+          content: "Test: Xin chào",
+        },
+      ],
+      temperature: 0.1,
+      max_tokens: 20,
+    })
+
+    const response = testCompletion.choices[0].message.content
+    console.log(`✅ Key ${keyIndex + 1} test OK: ${response}`)
+    return { success: true }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    console.log(`❌ Key ${keyIndex + 1} test failed: ${errorMsg}`)
+    return { success: false, error: errorMsg }
   }
 }
 
