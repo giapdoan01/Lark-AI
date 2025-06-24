@@ -8,7 +8,7 @@ import {
   debugTableStructure,
   testTableAccess,
 } from "../lib/base"
-import { analyzeDataWithParallelKeys, answerQuestionWithData, testAllApiKeys } from "../lib/groqClient"
+import { preprocessDataWithPipeline, answerQuestionWithData, testAllApiKeys } from "../lib/groqClient"
 
 interface ChatBotProps {
   tableId: string
@@ -31,6 +31,8 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [loadingProgress, setLoadingProgress] = useState<string>("")
   const [keyUsageInfo, setKeyUsageInfo] = useState<any>(null)
   const [isDataReady, setIsDataReady] = useState(false)
+  const [optimizedData, setOptimizedData] = useState<string>("")
+  const [pipelineStage, setPipelineStage] = useState<string>("")
 
   const runDebug = async () => {
     console.log("🔍 Chạy detailed debug...")
@@ -72,7 +74,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       setLoadingProgress("")
 
       if (data.length > 0) {
-        await performParallelAnalysis(data)
+        await performDataPreprocessing(data)
       }
     } catch (err) {
       console.error("❌ Error loading all data:", err)
@@ -82,8 +84,8 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     }
   }
 
-  // Function phân tích song song với multiple API keys
-  const performParallelAnalysis = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
+  // Function preprocessing pipeline
+  const performDataPreprocessing = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
     if (data.length === 0) return
 
     // Kiểm tra xem có dữ liệu thực không
@@ -98,28 +100,48 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
     setIsAutoAnalyzing(true)
     try {
-      console.log(`🚀 Bắt đầu phân tích song song với ${data.length} records...`)
-      setLoadingProgress(`Đang phân tích ${data.length} records với multiple API keys...`)
+      console.log(`🚀 Bắt đầu Data Preprocessing Pipeline với ${data.length} records...`)
 
-      // Sử dụng function phân tích song song mới
-      const result = await analyzeDataWithParallelKeys(data, tableName)
+      // Stage 1: Chia dữ liệu
+      setPipelineStage("📊 Đang chia dữ liệu thành chunks...")
+      setLoadingProgress(`Bước 1/4: Chia ${data.length} records thành chunks`)
+
+      // Stage 2: Optimize
+      setPipelineStage("🔧 Đang optimize dữ liệu song song...")
+      setLoadingProgress(`Bước 2/4: Optimize dữ liệu với multiple API keys`)
+
+      // Stage 3: Merge
+      setPipelineStage("🔄 Đang gộp dữ liệu đã optimize...")
+      setLoadingProgress(`Bước 3/4: Gộp dữ liệu đã optimize`)
+
+      // Stage 4: Analyze
+      setPipelineStage("🤖 Đang phân tích tổng hợp...")
+      setLoadingProgress(`Bước 4/4: Phân tích tổng hợp với AI`)
+
+      // Chạy preprocessing pipeline
+      const result = await preprocessDataWithPipeline(data, tableName)
 
       if (result.success) {
+        setOptimizedData(result.optimizedData)
         setAutoAnalysis(result.analysis)
         setKeyUsageInfo(result.keyUsage)
         setIsDataReady(true)
-        console.log("✅ Hoàn thành phân tích song song")
+        setPipelineStage("✅ Pipeline hoàn thành!")
+        console.log("✅ Hoàn thành Data Preprocessing Pipeline")
       } else {
         setAutoAnalysis(result.analysis)
         setIsDataReady(false)
+        setPipelineStage("❌ Pipeline thất bại")
       }
     } catch (err) {
-      console.error("❌ Lỗi khi phân tích song song:", err)
-      setAutoAnalysis("❌ Không thể thực hiện phân tích song song. Vui lòng thử lại.")
+      console.error("❌ Lỗi khi chạy preprocessing pipeline:", err)
+      setAutoAnalysis("❌ Không thể thực hiện preprocessing pipeline. Vui lòng thử lại.")
       setIsDataReady(false)
+      setPipelineStage("❌ Pipeline lỗi")
     } finally {
       setIsAutoAnalyzing(false)
       setLoadingProgress("")
+      setPipelineStage("")
     }
   }
 
@@ -164,9 +186,9 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           )
 
           if (hasRealData) {
-            // Phân tích song song với multiple API keys
-            console.log("🚀 Bắt đầu phân tích song song...")
-            await performParallelAnalysis(data)
+            // Chạy Data Preprocessing Pipeline
+            console.log("🚀 Bắt đầu Data Preprocessing Pipeline...")
+            await performDataPreprocessing(data)
           } else {
             setError("Đã lấy được records nhưng không có thông tin chi tiết fields. Vui lòng chạy debug để khắc phục.")
           }
@@ -193,10 +215,10 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     setAnswer("") // Clear previous answer
 
     try {
-      console.log("🤔 Bắt đầu trả lời câu hỏi...")
+      console.log("🤔 Bắt đầu trả lời câu hỏi với optimized data...")
 
-      // Sử dụng function trả lời câu hỏi mới với dữ liệu đã phân tích
-      const response = await answerQuestionWithData(tableData, tableName, question, autoAnalysis)
+      // Sử dụng optimized data để trả lời câu hỏi
+      const response = await answerQuestionWithData(tableData, tableName, question, autoAnalysis, optimizedData)
       setAnswer(response)
       console.log("✅ Đã nhận được câu trả lời từ AI")
     } catch (err) {
@@ -210,7 +232,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
   const refreshAnalysis = async () => {
     if (tableData.length > 0) {
-      await performParallelAnalysis(tableData)
+      await performDataPreprocessing(tableData)
     }
   }
 
@@ -226,11 +248,12 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         {loadingProgress && (
           <div style={{ fontSize: "12px", color: "#007acc", marginTop: "5px" }}>{loadingProgress}</div>
         )}
+        {pipelineStage && <div style={{ fontSize: "12px", color: "#ff6600", marginTop: "5px" }}>{pipelineStage}</div>}
         {sdkStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>{sdkStatus}</div>}
         {apiStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>{apiStatus}</div>}
         {isAutoAnalyzing && (
           <div style={{ fontSize: "12px", color: "#007acc", marginTop: "5px" }}>
-            🚀 Đang phân tích song song với multiple API keys...
+            🚀 Đang chạy Data Preprocessing Pipeline...
           </div>
         )}
       </div>
@@ -251,10 +274,16 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         )}
         {keyUsageInfo && (
           <div>
-            🔑 API Keys: {keyUsageInfo.usedKeys}/{keyUsageInfo.totalKeys} hoạt động ({keyUsageInfo.successRate})
+            🔧 Pipeline: {keyUsageInfo.optimizeKeys} keys optimize + 1 key analyze = {keyUsageInfo.optimizeKeys + 1}/
+            {keyUsageInfo.totalKeys} keys used
           </div>
         )}
-        {isDataReady && <div style={{ color: "green" }}>✅ Dữ liệu đã sẵn sàng để trả lời câu hỏi!</div>}
+        {optimizedData && (
+          <div style={{ color: "green" }}>
+            ✅ Optimized data: {optimizedData.length} characters (từ {tableData.length} records)
+          </div>
+        )}
+        {isDataReady && <div style={{ color: "green" }}>✅ Data Pipeline hoàn thành - Sẵn sàng trả lời câu hỏi!</div>}
       </div>
 
       {error && (
@@ -292,7 +321,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         </div>
       )}
 
-      {/* Phần phân tích song song */}
+      {/* Data Preprocessing Pipeline Status */}
       {(autoAnalysis || isAutoAnalyzing) && (
         <div
           style={{
@@ -304,17 +333,27 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <h3 style={{ margin: 0 }}>
-              🚀 Phân tích song song ({tableData.length} records với {keyUsageInfo?.totalKeys || "multiple"} API keys)
-            </h3>
+            <h3 style={{ margin: 0 }}>🚀 Data Preprocessing Pipeline ({tableData.length} records)</h3>
             <button onClick={refreshAnalysis} disabled={isAutoAnalyzing} style={{ fontSize: "12px" }}>
-              {isAutoAnalyzing ? "🔄 Đang phân tích..." : "🔄 Phân tích lại"}
+              {isAutoAnalyzing ? "🔄 Đang xử lý..." : "🔄 Chạy lại Pipeline"}
             </button>
           </div>
+
           {isAutoAnalyzing ? (
             <div>
-              🚀 Đang phân tích toàn bộ {tableData.length} records với {keyUsageInfo?.totalKeys || "multiple"} API keys
-              song song...
+              <div>🚀 Đang chạy Data Preprocessing Pipeline với {tableData.length} records...</div>
+              {pipelineStage && <div style={{ marginTop: "5px", fontStyle: "italic" }}>{pipelineStage}</div>}
+              <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
+                <strong>Pipeline Steps:</strong>
+                <br />
+                1. 📊 Chia dữ liệu → chunks
+                <br />
+                2. 🔧 Optimize song song → giảm tokens
+                <br />
+                3. 🔄 Gộp dữ liệu → hoàn chỉnh
+                <br />
+                4. 🤖 Phân tích tổng hợp → insights
+              </div>
             </div>
           ) : (
             <div style={{ whiteSpace: "pre-wrap" }}>{autoAnalysis}</div>
@@ -365,15 +404,15 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           <div style={{ marginBottom: "10px", fontSize: "12px", color: "#666" }}>
             {isDataReady ? (
               <>
-                ✅ Dữ liệu đã được phân tích song song với {keyUsageInfo?.usedKeys || "multiple"} API keys. Bạn có thể
-                hỏi bất kỳ câu hỏi nào!
+                ✅ Data Pipeline hoàn thành! AI đã nhận được TOÀN BỘ {tableData.length} records đã optimize.
                 <br />🔍 Ví dụ: &quot;Phân tích theo phòng ban&quot;, &quot;Thống kê tài sản&quot;, &quot;Tìm xu
                 hướng&quot;
+                <br />📊 Optimized data: {optimizedData.length} characters
               </>
             ) : (
               <>
-                ⏳ Đang chuẩn bị dữ liệu... Vui lòng chờ phân tích hoàn tất.
-                <br />📊 {tableData.length} records đang được xử lý song song.
+                ⏳ Đang chạy Data Preprocessing Pipeline... Vui lòng chờ.
+                <br />📊 {tableData.length} records đang được optimize và phân tích.
               </>
             )}
           </div>
@@ -387,13 +426,13 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           />
           <div style={{ marginBottom: "10px" }}>
             <button onClick={handleAskQuestion} disabled={isAsking || !question.trim() || !isDataReady}>
-              {isAsking ? "🤔 Đang suy nghĩ..." : "🚀 Hỏi AI (Parallel Processing)"}
+              {isAsking ? "🤔 Đang suy nghĩ..." : "🚀 Hỏi AI (Optimized Data)"}
             </button>
             <button onClick={testAPI} style={{ marginLeft: "10px", fontSize: "12px" }}>
               🧪 Test Keys
             </button>
             <button onClick={refreshAnalysis} style={{ marginLeft: "10px", fontSize: "12px" }}>
-              🔄 Phân tích lại
+              🔄 Chạy lại Pipeline
             </button>
             <button onClick={runDebug} style={{ marginLeft: "10px", fontSize: "12px" }}>
               🔍 Debug
@@ -413,7 +452,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
                 border: `1px solid ${answer.includes("❌") ? "#ff4444" : "#4caf50"}`,
               }}
             >
-              <h4>💡 Câu trả lời từ AI (Parallel Processing - {tableData.length} records):</h4>
+              <h4>💡 Câu trả lời từ AI (Optimized Pipeline - {tableData.length} records):</h4>
               <div style={{ whiteSpace: "pre-wrap" }}>{answer}</div>
             </div>
           )}
