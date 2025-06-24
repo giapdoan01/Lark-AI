@@ -1,44 +1,27 @@
 import { Groq } from "groq-sdk"
 
-// Danh sách các API keys (thêm nhiều keys vào đây)
+// Danh sách 10 API keys từ 10 accounts khác nhau
 const API_KEYS = [
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_1 || "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",
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_2 || "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",
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_3 || "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",
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_4 || "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",
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_5 || "ygsk_QrymOUGpWhGISmUzmJM4WGdyb3FY9kePDDtFoUCCA6gLBZllrAeD",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_1 || "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",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_2 || "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",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_3 || "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",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_4 || "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",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_5 || "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",
 ].filter(
   (key) =>
     key &&
-    key !== "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" &&
-    key !== "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" &&
-    key !== "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" &&
-    key !== "ygsk_QrymOUGpWhGISmUzmJM4WGdyb3FY9kePDDtFoUCCA6gLBZllrAeD",
-) // Lọc bỏ keys trống
+    !key.includes("account") && // Lọc bỏ placeholder keys
+    key.startsWith("gsk_"), // Chỉ lấy keys hợp lệ
+)
 
-// Danh sách các model khả dụng (theo thứ tự ưu tiên)
 const AVAILABLE_MODELS = [
-  "llama-3.3-70b-versatile", // Model có context length lớn nhất
+  "llama-3.3-70b-versatile",
   "llama-3.1-8b-instant",
   "llama3-70b-8192",
   "llama3-8b-8192",
   "mixtral-8x7b-32768",
   "gemma-7b-it",
 ]
-
-// Biến để track key rotation
-let currentKeyIndex = 0
-let requestCount = 0
-
-// Function để lấy API key tiếp theo
-const getNextApiKey = (): string => {
-  const key = API_KEYS[currentKeyIndex]
-  currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length
-  requestCount++
-
-  console.log(`🔑 Using API key ${currentKeyIndex + 1}/${API_KEYS.length} (Request #${requestCount})`)
-  return key
-}
 
 // Function tạo Groq client với key cụ thể
 const createGroqClient = (apiKey: string): Groq => {
@@ -48,315 +31,310 @@ const createGroqClient = (apiKey: string): Groq => {
   })
 }
 
-// Function thử các model khác nhau với key rotation
-const tryWithDifferentModels = async (
+// Function gửi request với 1 key cụ thể
+const sendRequestWithKey = async (
+  apiKey: string,
+  keyIndex: number,
   messages: any[],
-  currentModelIndex = 0,
-  retryWithNewKey = false,
-): Promise<string> => {
-  if (currentModelIndex >= AVAILABLE_MODELS.length) {
-    throw new Error("Tất cả các model đều không khả dụng")
-  }
-
-  const model = AVAILABLE_MODELS[currentModelIndex]
-  const apiKey = getNextApiKey()
-  const groq = createGroqClient(apiKey)
-
-  console.log(`🤖 Thử model: ${model} với API key ${currentKeyIndex}/${API_KEYS.length}`)
-
+  chunkInfo: string,
+): Promise<{ success: boolean; result: string; keyIndex: number; error?: string }> => {
   try {
-    const chatCompletion = await groq.chat.completions.create({
-      model: model,
-      messages: messages,
-      temperature: 0.7,
-      max_tokens: 12000, // Tăng max_tokens như bạn yêu cầu
-      top_p: 1,
-    })
+    console.log(`🔑 Key ${keyIndex + 1}/${API_KEYS.length}: ${chunkInfo}`)
 
-    const response = chatCompletion.choices[0].message.content
-    console.log(`✅ Model ${model} với key ${currentKeyIndex}/${API_KEYS.length} hoạt động thành công`)
-    return response || "Không có câu trả lời từ AI."
-  } catch (error) {
-    console.log(`❌ Model ${model} với key ${currentKeyIndex}/${API_KEYS.length} thất bại:`, error)
+    const groq = createGroqClient(apiKey)
 
-    // Nếu lỗi rate limit và còn keys khác, thử key khác
-    if (error instanceof Error && error.message.includes("rate_limit") && API_KEYS.length > 1 && !retryWithNewKey) {
-      console.log(`🔄 Rate limit với key hiện tại, thử key khác...`)
-      return await tryWithDifferentModels(messages, currentModelIndex, true)
-    }
+    // Thử từng model cho đến khi thành công
+    for (const model of AVAILABLE_MODELS) {
+      try {
+        const chatCompletion = await groq.chat.completions.create({
+          model: model,
+          messages: messages,
+          temperature: 0.7,
+          max_tokens: 8000,
+          top_p: 1,
+        })
 
-    // Nếu model bị decommission hoặc không khả dụng, thử model tiếp theo
-    if (
-      error instanceof Error &&
-      (error.message.includes("decommissioned") ||
-        error.message.includes("not found") ||
-        error.message.includes("invalid_request_error"))
-    ) {
-      console.log(`🔄 Thử model tiếp theo...`)
-      return await tryWithDifferentModels(messages, currentModelIndex + 1)
-    }
+        const response = chatCompletion.choices[0].message.content || "Không có phản hồi"
+        console.log(`✅ Key ${keyIndex + 1} với model ${model}: Thành công`)
 
-    // Nếu là lỗi khác, throw ngay
-    throw error
-  }
-}
-
-// Function tối ưu dữ liệu cho AI - giữ nguyên tất cả dữ liệu
-const optimizeDataForAI = (data: any[]): string => {
-  // Loại bỏ các field null/empty để giảm kích thước nhưng giữ nguyên cấu trúc
-  const optimizedData = data.map((record) => {
-    const optimizedFields: Record<string, any> = {}
-
-    // Chỉ giữ lại fields có giá trị
-    for (const [key, value] of Object.entries(record.fields)) {
-      if (value !== null && value !== undefined && value !== "") {
-        optimizedFields[key] = value
+        return {
+          success: true,
+          result: response,
+          keyIndex: keyIndex,
+        }
+      } catch (modelError) {
+        console.log(`❌ Key ${keyIndex + 1} với model ${model}: ${modelError}`)
+        continue
       }
     }
 
+    throw new Error("Tất cả models đều thất bại")
+  } catch (error) {
+    console.error(`❌ Key ${keyIndex + 1} thất bại hoàn toàn:`, error)
     return {
-      recordId: record.recordId,
-      fields: optimizedFields,
+      success: false,
+      result: "",
+      keyIndex: keyIndex,
+      error: error instanceof Error ? error.message : String(error),
     }
-  })
-
-  return JSON.stringify(optimizedData, null, 1) // Dùng indent = 1 để tiết kiệm space
+  }
 }
 
-// Function chia dữ liệu thành chunks và gửi riêng biệt với key rotation
-export const askAIWithFullData = async (data: any[], tableName: string, question: string): Promise<string> => {
+// Function chính: Phân tích dữ liệu song song với multiple keys
+export const analyzeDataWithParallelKeys = async (
+  data: any[],
+  tableName: string,
+): Promise<{ success: boolean; analysis: string; keyUsage: any }> => {
   try {
-    console.log(`🤖 Xử lý ${data.length} records với full data approach và ${API_KEYS.length} API keys`)
+    console.log(`🚀 Bắt đầu phân tích song song ${data.length} records với ${API_KEYS.length} API keys`)
 
-    // Thử gửi toàn bộ dữ liệu đã tối ưu trước
-    const optimizedDataString = optimizeDataForAI(data)
-    console.log(`📊 Optimized data length: ${optimizedDataString.length} characters`)
-
-    // Nếu dữ liệu vẫn nhỏ, gửi toàn bộ
-    if (optimizedDataString.length < 40000) {
-      // Tăng threshold do có nhiều keys
-      console.log("📤 Gửi toàn bộ dữ liệu optimized...")
-
-      const context = `Bạn là một AI assistant thông minh. Dưới đây là TOÀN BỘ ${data.length} records từ bảng "${tableName}" trong Lark Base:
-
-${optimizedDataString}
-
-Đây là tất cả ${data.length} bản ghi đầy đủ, không bị cắt bớt hay tóm tắt.
-
-Hãy phân tích dữ liệu này và trả lời câu hỏi của người dùng một cách chính xác. Trả lời bằng tiếng Việt.`
-
-      return await askAI(context, question)
+    if (API_KEYS.length === 0) {
+      throw new Error("Không có API keys hợp lệ")
     }
 
-    // Nếu dữ liệu lớn, chia thành chunks
-    const chunkSize = 20 // Tăng chunk size do có nhiều keys
+    // Chia dữ liệu thành chunks theo số lượng API keys
+    const chunkSize = Math.ceil(data.length / API_KEYS.length)
     const chunks = []
+
     for (let i = 0; i < data.length; i += chunkSize) {
       chunks.push(data.slice(i, i + chunkSize))
     }
 
-    console.log(`📊 Chia dữ liệu thành ${chunks.length} chunks với ${API_KEYS.length} API keys`)
+    console.log(`📊 Chia ${data.length} records thành ${chunks.length} chunks (${chunkSize} records/chunk)`)
 
-    // Gửi từng chunk và tổng hợp kết quả (mỗi chunk dùng key khác nhau)
-    let combinedAnalysis = `Tôi đã phân tích toàn bộ ${data.length} bản ghi được chia thành ${chunks.length} phần với ${API_KEYS.length} API keys:\n\n`
+    // Tạo promises cho từng chunk với key riêng biệt
+    const analysisPromises = chunks.map((chunk, index) => {
+      const apiKey = API_KEYS[index % API_KEYS.length] // Đảm bảo không vượt quá số keys
+      const chunkData = JSON.stringify(chunk, null, 1)
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i]
-      const chunkDataString = JSON.stringify(
-        chunk.map((record) => ({
-          recordId: record.recordId,
-          fields: record.fields,
-        })),
-        null,
-        1,
+      const messages = [
+        {
+          role: "system",
+          content: `Bạn là một AI assistant chuyên phân tích dữ liệu. Dưới đây là phần ${index + 1}/${chunks.length} của dữ liệu từ bảng "${tableName}":
+
+${chunkData}
+
+Đây là ${chunk.length} bản ghi (từ ${index * chunkSize + 1} đến ${Math.min((index + 1) * chunkSize, data.length)}) trong tổng số ${data.length} bản ghi.`,
+        },
+        {
+          role: "user",
+          content: `Hãy phân tích phần dữ liệu này một cách chi tiết, bao gồm:
+1. Tóm tắt nội dung chính của ${chunk.length} records này
+2. Các thống kê quan trọng (nếu có)
+3. Những điểm đáng chú ý
+4. Xu hướng hoặc pattern (nếu phát hiện được)
+
+Trả lời bằng tiếng Việt, ngắn gọn nhưng đầy đủ thông tin.`,
+        },
+      ]
+
+      return sendRequestWithKey(
+        apiKey,
+        index,
+        messages,
+        `Chunk ${index + 1}/${chunks.length} (${chunk.length} records)`,
       )
+    })
 
-      console.log(`📤 Xử lý chunk ${i + 1}/${chunks.length} (${chunk.length} records) với key rotation`)
+    // Chờ tất cả requests hoàn thành
+    console.log(`⏳ Đang gửi ${analysisPromises.length} requests song song...`)
+    const results = await Promise.all(analysisPromises)
 
-      const chunkContext = `Bạn là một AI assistant thông minh. Dưới đây là phần ${i + 1}/${chunks.length} của dữ liệu từ bảng "${tableName}":
+    // Phân tích kết quả
+    const successfulResults = results.filter((r) => r.success)
+    const failedResults = results.filter((r) => !r.success)
 
-${chunkDataString}
+    console.log(`📊 Kết quả: ${successfulResults.length}/${results.length} requests thành công`)
 
-Đây là ${chunk.length} bản ghi (từ ${i * chunkSize + 1} đến ${Math.min((i + 1) * chunkSize, data.length)}) trong tổng số ${data.length} bản ghi.
-
-Hãy phân tích phần dữ liệu này và trả về kết quả ngắn gọn. Trả lời bằng tiếng Việt.`
-
-      try {
-        const chunkResult = await askAI(chunkContext, `Phân tích phần ${i + 1}: ${question}`)
-        combinedAnalysis += `**Phần ${i + 1} (Records ${i * chunkSize + 1}-${Math.min((i + 1) * chunkSize, data.length)}):**\n${chunkResult}\n\n`
-      } catch (error) {
-        console.error(`❌ Lỗi xử lý chunk ${i + 1}:`, error)
-        combinedAnalysis += `**Phần ${i + 1}:** Lỗi xử lý - ${error}\n\n`
-      }
-
-      // Delay ngắn hơn do có nhiều keys
-      await new Promise((resolve) => setTimeout(resolve, 500))
+    if (successfulResults.length === 0) {
+      throw new Error("Tất cả requests đều thất bại")
     }
 
-    // Gửi câu hỏi tổng hợp cuối cùng
-    const finalContext = `Bạn là một AI assistant thông minh. Tôi đã phân tích toàn bộ ${data.length} bản ghi từ bảng "${tableName}" theo từng phần với ${API_KEYS.length} API keys. Dưới đây là kết quả phân tích:
+    // Gộp kết quả từ các chunks
+    let combinedAnalysis = `🤖 **PHÂN TÍCH TỔNG HỢP DỮ LIỆU BẢNG "${tableName.toUpperCase()}"**\n\n`
+    combinedAnalysis += `📊 **Tổng quan:** ${data.length} bản ghi được phân tích bằng ${successfulResults.length}/${API_KEYS.length} API keys\n\n`
 
-${combinedAnalysis}
+    successfulResults.forEach((result, index) => {
+      const chunkStart = result.keyIndex * chunkSize + 1
+      const chunkEnd = Math.min((result.keyIndex + 1) * chunkSize, data.length)
 
-Dựa trên tất cả thông tin trên, hãy đưa ra câu trả lời tổng hợp và đầy đủ cho câu hỏi. Trả lời bằng tiếng Việt.`
+      combinedAnalysis += `**📋 PHẦN ${result.keyIndex + 1} (Records ${chunkStart}-${chunkEnd}):**\n`
+      combinedAnalysis += `${result.result}\n\n`
+    })
 
-    return await askAI(finalContext, question)
+    // Thêm thông tin về failed requests nếu có
+    if (failedResults.length > 0) {
+      combinedAnalysis += `⚠️ **LƯU Ý:** ${failedResults.length} phần dữ liệu không thể phân tích do lỗi API keys.\n\n`
+    }
+
+    // Tạo tóm tắt cuối
+    combinedAnalysis += `✅ **KẾT LUẬN:** Đã hoàn thành phân tích song song với ${successfulResults.length} API keys. Dữ liệu đã sẵn sàng để trả lời câu hỏi chi tiết.`
+
+    const keyUsage = {
+      totalKeys: API_KEYS.length,
+      usedKeys: successfulResults.length,
+      failedKeys: failedResults.length,
+      successRate: `${Math.round((successfulResults.length / results.length) * 100)}%`,
+      chunks: chunks.length,
+      recordsPerChunk: chunkSize,
+    }
+
+    return {
+      success: true,
+      analysis: combinedAnalysis,
+      keyUsage: keyUsage,
+    }
   } catch (error) {
-    console.error("❌ askAIWithFullData failed:", error)
-    return `❌ Lỗi khi phân tích dữ liệu: ${error}`
+    console.error("❌ analyzeDataWithParallelKeys failed:", error)
+    return {
+      success: false,
+      analysis: `❌ Lỗi phân tích song song: ${error}`,
+      keyUsage: { error: true },
+    }
   }
 }
 
-export const askAI = async (context: string, question: string): Promise<string> => {
+// Function trả lời câu hỏi dựa trên dữ liệu đã phân tích
+export const answerQuestionWithData = async (
+  data: any[],
+  tableName: string,
+  question: string,
+  previousAnalysis?: string,
+): Promise<string> => {
   try {
-    console.log("🤖 Bắt đầu gọi Groq API...")
-    console.log("📝 Context length:", context.length)
-    console.log("❓ Question:", question)
-    console.log(`🔑 Available API keys: ${API_KEYS.length}`)
+    console.log(`🤔 Trả lời câu hỏi với ${data.length} records`)
+
+    // Chọn 1 key ngẫu nhiên để trả lời câu hỏi
+    const randomKeyIndex = Math.floor(Math.random() * API_KEYS.length)
+    const selectedKey = API_KEYS[randomKeyIndex]
+
+    console.log(`🔑 Sử dụng key ${randomKeyIndex + 1}/${API_KEYS.length} để trả lời câu hỏi`)
+
+    // Tạo context với toàn bộ dữ liệu + phân tích trước đó (nếu có)
+    let context = `Bạn là một AI assistant thông minh. Dưới đây là TOÀN BỘ dữ liệu từ bảng "${tableName}" (${data.length} records):
+
+${JSON.stringify(data, null, 1)}`
+
+    if (previousAnalysis) {
+      context += `\n\nPhân tích trước đó:\n${previousAnalysis}`
+    }
+
+    context += `\n\nHãy dựa vào dữ liệu trên để trả lời câu hỏi một cách chính xác và chi tiết. Trả lời bằng tiếng Việt.`
 
     const messages = [
       {
-        role: "system" as const,
+        role: "system",
         content: context,
       },
       {
-        role: "user" as const,
+        role: "user",
         content: question,
       },
     ]
 
-    // Thử với các model khác nhau và key rotation
-    const response = await tryWithDifferentModels(messages)
-    console.log("✅ Groq API response received")
+    const result = await sendRequestWithKey(selectedKey, randomKeyIndex, messages, "Trả lời câu hỏi")
 
-    return response
-  } catch (error) {
-    console.error("❌ Chi tiết lỗi Groq API:", error)
-
-    // Xử lý các loại lỗi cụ thể
-    if (error instanceof Error) {
-      if (error.message.includes("rate_limit")) {
-        return `⏰ Tất cả ${API_KEYS.length} API keys đều đạt giới hạn tốc độ. Vui lòng thử lại sau vài giây.`
-      } else if (error.message.includes("invalid_api_key")) {
-        return "🔑 Một hoặc nhiều API keys không hợp lệ. Vui lòng kiểm tra cấu hình."
-      } else if (error.message.includes("context_length")) {
-        return "📏 Dữ liệu quá lớn để xử lý. Hãy thử với câu hỏi cụ thể hơn hoặc chia nhỏ dữ liệu."
-      } else if (error.message.includes("network") || error.message.includes("fetch")) {
-        return "🌐 Lỗi kết nối mạng. Vui lòng kiểm tra internet và thử lại."
-      } else if (error.message.includes("Tất cả các model đều không khả dụng")) {
-        return "🤖 Tất cả các AI model hiện tại đều không khả dụng. Vui lòng thử lại sau."
-      }
-
-      return `❌ Lỗi AI: ${error.message}`
+    if (result.success) {
+      return result.result
+    } else {
+      throw new Error(result.error || "Không thể trả lời câu hỏi")
     }
-
-    return "❌ Đã xảy ra lỗi không xác định khi gọi AI. Vui lòng thử lại."
-  }
-}
-
-// Function test mode - gửi toàn bộ dữ liệu raw với key rotation
-export const askAIWithRawData = async (data: any[], tableName: string, question: string): Promise<string> => {
-  try {
-    console.log(`🧪 TEST MODE: Gửi toàn bộ ${data.length} records raw data với ${API_KEYS.length} keys`)
-
-    const rawDataString = JSON.stringify(data, null, 2)
-    console.log(`📊 Raw data length: ${rawDataString.length} characters`)
-
-    const context = `Bạn là một AI assistant thông minh. Dưới đây là TOÀN BỘ ${data.length} records từ bảng "${tableName}" trong Lark Base (RAW DATA):
-
-${rawDataString}
-
-QUAN TRỌNG: Đây là tất cả ${data.length} bản ghi đầy đủ, không bị tóm tắt hay cắt bớt. Bạn có thể truy cập và phân tích tất cả dữ liệu này.
-
-Hãy phân tích dữ liệu này và trả lời câu hỏi. Trả lời bằng tiếng Việt.`
-
-    return await askAI(context, question)
   } catch (error) {
-    console.error("❌ askAIWithRawData failed:", error)
-    return `❌ Lỗi khi gửi raw data: ${error}`
+    console.error("❌ answerQuestionWithData failed:", error)
+    return `❌ Lỗi khi trả lời câu hỏi: ${error}`
   }
 }
 
-// Function test API với key rotation
-export const testGroqAPI = async (): Promise<{
+// Function test tất cả API keys
+export const testAllApiKeys = async (): Promise<{
   success: boolean
   message: string
-  workingModel?: string
-  workingKeys?: number
+  workingKeys: number
+  totalKeys: number
+  keyDetails: any[]
 }> => {
-  console.log(`🧪 Testing Groq API với ${API_KEYS.length} API keys và ${AVAILABLE_MODELS.length} models...`)
+  console.log(`🧪 Testing ${API_KEYS.length} API keys...`)
 
-  let workingKeys = 0
-  let workingModel = ""
+  const testPromises = API_KEYS.map(async (apiKey, index) => {
+    try {
+      const groq = createGroqClient(apiKey)
 
-  for (const model of AVAILABLE_MODELS) {
-    for (let keyIndex = 0; keyIndex < API_KEYS.length; keyIndex++) {
-      try {
-        const apiKey = API_KEYS[keyIndex]
-        const groq = createGroqClient(apiKey)
+      const testCompletion = await groq.chat.completions.create({
+        model: "llama-3.1-8b-instant", // Model nhanh để test
+        messages: [
+          {
+            role: "user",
+            content: "Test: 1+1=?",
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 10,
+      })
 
-        console.log(`🧪 Testing model: ${model} với key ${keyIndex + 1}/${API_KEYS.length}`)
+      const response = testCompletion.choices[0].message.content
+      console.log(`✅ Key ${index + 1}: OK`)
 
-        const testCompletion = await groq.chat.completions.create({
-          model: model,
-          messages: [
-            {
-              role: "user",
-              content: "Xin chào! Hãy trả lời bằng tiếng Việt: 1+1 bằng bao nhiêu?",
-            },
-          ],
-          temperature: 0.1,
-          max_tokens: 50,
-        })
-
-        const response = testCompletion.choices[0].message.content
-        console.log(`✅ Model ${model} với key ${keyIndex + 1} hoạt động! Response:`, response)
-
-        workingKeys++
-        if (!workingModel) workingModel = model
-      } catch (error) {
-        console.log(`❌ Model ${model} với key ${keyIndex + 1} failed:`, error)
-        continue
+      return {
+        keyIndex: index + 1,
+        status: "success",
+        response: response,
+        preview: `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`,
+      }
+    } catch (error) {
+      console.log(`❌ Key ${index + 1}: ${error}`)
+      return {
+        keyIndex: index + 1,
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+        preview: `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`,
       }
     }
-  }
+  })
 
-  if (workingKeys > 0) {
-    return {
-      success: true,
-      message: `${workingKeys}/${API_KEYS.length} API keys hoạt động với model ${workingModel}`,
-      workingModel: workingModel,
-      workingKeys: workingKeys,
-    }
-  }
+  const results = await Promise.all(testPromises)
+  const workingKeys = results.filter((r) => r.status === "success").length
 
   return {
-    success: false,
-    message: `Tất cả ${API_KEYS.length} API keys đều không khả dụng. Vui lòng kiểm tra keys hoặc thử lại sau.`,
-    workingKeys: 0,
+    success: workingKeys > 0,
+    message: `${workingKeys}/${API_KEYS.length} API keys hoạt động`,
+    workingKeys: workingKeys,
+    totalKeys: API_KEYS.length,
+    keyDetails: results,
   }
+}
+
+// Backward compatibility functions
+export const askAI = async (context: string, question: string): Promise<string> => {
+  return await answerQuestionWithData([], "Unknown", question)
+}
+
+export const askAIWithFullData = async (data: any[], tableName: string, question: string): Promise<string> => {
+  return await answerQuestionWithData(data, tableName, question)
+}
+
+export const askAIWithRawData = async (data: any[], tableName: string, question: string): Promise<string> => {
+  return await answerQuestionWithData(data, tableName, question)
+}
+
+export const testGroqAPI = async () => {
+  const result = await testAllApiKeys()
+  return {
+    success: result.success,
+    message: result.message,
+    workingModel: "multiple",
+  }
+}
+
+export const getAvailableModels = (): string[] => {
+  return AVAILABLE_MODELS
 }
 
 // Function để lấy thông tin về API keys
 export const getApiKeysInfo = () => {
   return {
     totalKeys: API_KEYS.length,
-    currentKeyIndex: currentKeyIndex,
-    requestCount: requestCount,
     keysPreview: API_KEYS.map(
       (key, index) => `Key ${index + 1}: ${key.substring(0, 10)}...${key.substring(key.length - 4)}`,
     ),
   }
-}
-
-// Function để reset key rotation
-export const resetKeyRotation = () => {
-  currentKeyIndex = 0
-  requestCount = 0
-  console.log("🔄 Key rotation reset")
-}
-
-// Function để lấy danh sách model khả dụng
-export const getAvailableModels = (): string[] => {
-  return AVAILABLE_MODELS
 }
