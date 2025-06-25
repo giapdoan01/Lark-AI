@@ -411,45 +411,83 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         </div>
       )}
 
-      <div style={{ marginBottom: "20px" }}>
-        <h3>📋 Dữ liệu bảng ({tableData.length} bản ghi):</h3>
-        {tableData.length === 0 ? (
-          <div style={{ padding: "20px", backgroundColor: "#f9f9f9", borderRadius: "6px", textAlign: "center" }}>
-            <p>⚠️ Không có dữ liệu để hiển thị</p>
-            <p style={{ fontSize: "12px", color: "#666" }}>Có thể bảng trống hoặc có vấn đề với quyền truy cập</p>
-            <button onClick={runDebug} style={{ fontSize: "12px", marginRight: "10px" }}>
-              🔍 Detailed Debug
-            </button>
-            <button onClick={testSample} style={{ fontSize: "12px" }}>
-              🧪 Test Sample
-            </button>
-          </div>
-        ) : (
+      {/* CSV Data Preview */}
+      {optimizedData && (
+        <div style={{ marginBottom: "20px" }}>
+          <h3>📊 CSV Data Preview ({tableData.length} records):</h3>
           <details>
-            <summary style={{ cursor: "pointer", padding: "10px", backgroundColor: "#f9f9f9", borderRadius: "6px" }}>
-              📊 Xem dữ liệu chi tiết ({tableData.length} records) - Click để mở/đóng
-              {keyUsageInfo?.format && (
-                <span style={{ color: "#007acc" }}> | Optimized: {keyUsageInfo.format} format</span>
-              )}
-            </summary>
-            <pre
+            <summary
               style={{
-                whiteSpace: "pre-wrap",
-                backgroundColor: "#f9f9f9",
+                cursor: "pointer",
                 padding: "10px",
+                backgroundColor: "#e8f4fd",
                 borderRadius: "6px",
-                maxHeight: "400px",
-                overflow: "auto",
-                fontSize: "11px",
-                marginTop: "10px",
+                border: "1px solid #007acc",
               }}
             >
-              {JSON.stringify(tableData.slice(0, 5), null, 2)}
-              {tableData.length > 5 && `\n\n... và ${tableData.length - 5} records khác`}
-            </pre>
+              📄 Xem CSV data đã convert - Click để mở/đóng ({optimizedData.length} characters)
+              {keyUsageInfo?.csvCompressionVsJson && (
+                <span style={{ color: "#007acc" }}>
+                  {" "}
+                  | Giảm {100 - Number.parseInt(keyUsageInfo.csvCompressionVsJson)}% tokens vs JSON
+                </span>
+              )}
+            </summary>
+            <div
+              style={{
+                marginTop: "10px",
+                padding: "15px",
+                backgroundColor: "#f9f9f9",
+                borderRadius: "6px",
+                border: "1px solid #ddd",
+              }}
+            >
+              <div style={{ marginBottom: "10px", fontSize: "12px", color: "#666" }}>
+                ✅ Đây là CSV data đã được optimize và sẽ được gửi cho AI để phân tích
+              </div>
+              <pre
+                style={{
+                  whiteSpace: "pre-wrap",
+                  backgroundColor: "white",
+                  padding: "15px",
+                  borderRadius: "4px",
+                  maxHeight: "400px",
+                  overflow: "auto",
+                  fontSize: "11px",
+                  border: "1px solid #ccc",
+                  fontFamily: "monospace",
+                }}
+              >
+                {optimizedData.split("\n").slice(0, 20).join("\n")}
+                {optimizedData.split("\n").length > 20 &&
+                  `\n\n... và ${optimizedData.split("\n").length - 20} dòng khác`}
+              </pre>
+              <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
+                📊 Total: {optimizedData.split("\n").length - 1} data rows + 1 header row ={" "}
+                {optimizedData.split("\n").length} total lines
+              </div>
+            </div>
           </details>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Debug section chỉ hiện khi có lỗi */}
+      {error && (
+        <div style={{ marginBottom: "20px" }}>
+          <h3>🔧 Debug Tools:</h3>
+          <div style={{ padding: "10px", backgroundColor: "#f9f9f9", borderRadius: "6px" }}>
+            <button onClick={runDebug} style={{ marginRight: "10px", fontSize: "12px" }}>
+              🔍 Detailed Debug
+            </button>
+            <button onClick={testSample} style={{ marginRight: "10px", fontSize: "12px" }}>
+              🧪 Test Sample
+            </button>
+            <button onClick={loadAllData} style={{ marginRight: "10px", fontSize: "12px" }}>
+              📥 Load All Data
+            </button>
+          </div>
+        </div>
+      )}
 
       {tableData.length > 0 && (
         <div>
