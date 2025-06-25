@@ -8,7 +8,7 @@ import {
   debugTableStructure,
   testTableAccess,
 } from "../lib/base"
-import { preprocessDataWithPipeline, answerQuestionWithData } from "../lib/groqClient"
+import { preprocessDataWithPipeline, answerQuestionWithData, testAllApiKeys } from "../lib/groqClient"
 
 interface ChatBotProps {
   tableId: string
@@ -108,6 +108,129 @@ const LoadingSpinner = ({ size = 20 }: { size?: number }) => (
   />
 )
 
+// 🔥 NEW: API Status Component
+const APIStatusPanel = ({
+  apiTestResults,
+  isVisible,
+  onToggle,
+  onRefreshTests,
+}: {
+  apiTestResults: any
+  isVisible: boolean
+  onToggle: () => void
+  onRefreshTests: () => void
+}) => (
+  <div style={{ marginBottom: "20px" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+      <button
+        onClick={onToggle}
+        style={{
+          padding: "8px 16px",
+          backgroundColor: "#f8f9fa",
+          border: "1px solid #dee2e6",
+          borderRadius: "6px",
+          cursor: "pointer",
+          fontSize: "12px",
+          fontWeight: "500",
+        }}
+      >
+        {isVisible ? "🔽 Ẩn" : "🔼 Hiện"} API Status Debug ({apiTestResults?.workingKeys || 0}/
+        {apiTestResults?.totalKeys || 0} working)
+      </button>
+
+      {isVisible && (
+        <button
+          onClick={onRefreshTests}
+          style={{
+            padding: "6px 12px",
+            backgroundColor: "#007acc",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+            fontSize: "11px",
+          }}
+        >
+          🔄 Test lại APIs
+        </button>
+      )}
+    </div>
+
+    {isVisible && apiTestResults && (
+      <div
+        style={{
+          padding: "15px",
+          backgroundColor: "#f8f9fa",
+          borderRadius: "8px",
+          border: "1px solid #dee2e6",
+        }}
+      >
+        <div style={{ marginBottom: "15px" }}>
+          <h4 style={{ margin: "0 0 10px 0", fontSize: "14px" }}>
+            🔑 API Keys Status: {apiTestResults.workingKeys}/{apiTestResults.totalKeys} hoạt động
+          </h4>
+          <div style={{ fontSize: "12px", color: "#666" }}>
+            Model: {apiTestResults.keyDetails?.[0]?.model || "llama3-70b-8192"}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "10px" }}>
+          {apiTestResults.keyDetails?.map((key: any, index: number) => (
+            <div
+              key={index}
+              style={{
+                padding: "10px",
+                backgroundColor: key.status === "success" ? "#e8f5e8" : "#ffe6e6",
+                border: `1px solid ${key.status === "success" ? "#4caf50" : "#ff4444"}`,
+                borderRadius: "6px",
+              }}
+            >
+              <div
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}
+              >
+                <span style={{ fontWeight: "600", fontSize: "12px" }}>API {key.keyIndex}</span>
+                <span
+                  style={{
+                    fontSize: "11px",
+                    color: key.status === "success" ? "#4caf50" : "#ff4444",
+                    fontWeight: "600",
+                  }}
+                >
+                  {key.status === "success" ? "✅ WORKING" : "❌ FAILED"}
+                </span>
+              </div>
+
+              <div style={{ fontSize: "10px", color: "#666", marginBottom: "5px" }}>{key.preview}</div>
+
+              {key.status === "success" ? (
+                <div style={{ fontSize: "11px", color: "#4caf50" }}>Response: "{key.response}"</div>
+              ) : (
+                <div style={{ fontSize: "11px", color: "#ff4444" }}>Error: {key.error?.substring(0, 50)}...</div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Data Loss Analysis */}
+        <div style={{ marginTop: "15px", padding: "10px", backgroundColor: "#fff3cd", borderRadius: "6px" }}>
+          <h5 style={{ margin: "0 0 8px 0", fontSize: "13px", color: "#856404" }}>📊 Data Loss Analysis:</h5>
+          <div style={{ fontSize: "12px", color: "#856404" }}>
+            • Processing APIs: {apiTestResults.totalKeys - 1} (total - 1 for analysis)
+            <br />• Working APIs: {apiTestResults.workingKeys - 1} (excluding analysis API)
+            <br />• Failed APIs: {apiTestResults.totalKeys - 1 - (apiTestResults.workingKeys - 1)}
+            <br />• Expected chunks: {apiTestResults.totalKeys - 1}
+            <br />• Actual chunks: {apiTestResults.workingKeys - 1}
+            <br />•{" "}
+            <strong>
+              Data loss cause: {apiTestResults.totalKeys - 1 - (apiTestResults.workingKeys - 1)} failed API(s)
+            </strong>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+)
+
 export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   // States
   const [tableData, setTableData] = useState<Array<{ recordId: string; fields: Record<string, unknown> }>>([])
@@ -128,13 +251,46 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [processingStatus, setProcessingStatus] = useState<string>("")
   const [showDebugTools, setShowDebugTools] = useState(false)
 
+  // 🔥 NEW: API Status States
+  const [apiTestResults, setApiTestResults] = useState<any>(null)
+  const [showApiStatus, setShowApiStatus] = useState(false)
+  const [isTestingApis, setIsTestingApis] = useState(false)
+
   // Refs
   const hasLoadedData = useRef(false)
   const hasRunPipeline = useRef(false)
   const isInitializing = useRef(false)
 
   // 🎨 Pipeline Steps
-  const pipelineSteps = ["Kiểm tra SDK", "Lấy dữ liệu", "Chia đều chunks", "Thống kê AI", "Phân tích tổng hợp"]
+  const pipelineSteps = ["Kiểm tra SDK", "Test APIs", "Lấy dữ liệu", "Chia đều chunks", "Thống kê AI"]
+
+  // 🔥 NEW: Test API Keys Function
+  const testApiKeys = async () => {
+    setIsTestingApis(true)
+    try {
+      console.log("🧪 Testing all API keys...")
+      const results = await testAllApiKeys()
+      setApiTestResults(results)
+
+      // Auto show API status if there are failed keys
+      if (results.workingKeys < results.totalKeys) {
+        setShowApiStatus(true)
+      }
+
+      console.log("✅ API test results:", results)
+    } catch (error) {
+      console.error("❌ API testing failed:", error)
+      setApiTestResults({
+        success: false,
+        message: "API testing failed",
+        workingKeys: 0,
+        totalKeys: 0,
+        keyDetails: [],
+      })
+    } finally {
+      setIsTestingApis(false)
+    }
+  }
 
   // 🔧 Optimized Functions
   const performDataPreprocessing = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
@@ -151,7 +307,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
     hasRunPipeline.current = true
     setIsAutoAnalyzing(true)
-    setCurrentStep(2)
+    setCurrentStep(3)
 
     try {
       setProcessingStatus("🚀 Bắt đầu Equal Distribution Pipeline...")
@@ -165,6 +321,11 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         setIsDataReady(true)
         setCurrentStep(4)
         setProcessingStatus("✅ Pipeline hoàn thành!")
+
+        // 🔥 Auto show API status if there's data loss
+        if (result.keyUsage && result.keyUsage.dataLoss > 0) {
+          setShowApiStatus(true)
+        }
       } else {
         setAutoAnalysis(result.analysis)
         setIsDataReady(false)
@@ -201,7 +362,12 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         }
         setCurrentStep(1)
 
-        // Step 2: Get Data
+        // Step 2: Test API Keys
+        setProcessingStatus("🧪 Test API keys...")
+        await testApiKeys()
+        setCurrentStep(2)
+
+        // Step 3: Get Data
         setProcessingStatus("📊 Lấy thống kê bảng...")
         const stats = await getTableStats(tableId)
         setTableStats(stats)
@@ -210,7 +376,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         const data = await getTableData(tableId)
         setTableData(data)
         hasLoadedData.current = true
-        setCurrentStep(2)
+        setCurrentStep(3)
 
         console.log(`✅ Loaded ${data.length} records from table (expected: ${stats.totalRecords})`)
 
@@ -224,7 +390,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           console.warn(`⚠️ POTENTIAL DATA LOSS: Expected ${stats.totalRecords}, got ${data.length} records`)
         }
 
-        // Step 3: Process Data
+        // Step 4: Process Data
         const hasRealData = data.some((record) =>
           Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
         )
@@ -285,6 +451,15 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           type="info"
         />
 
+        {isTestingApis && (
+          <StatusCard
+            title="🧪 Testing API Keys"
+            status="Đang kiểm tra tất cả API keys..."
+            details="Kiểm tra kết nối và khả năng xử lý của từng API"
+            type="info"
+          />
+        )}
+
         {isAutoAnalyzing && (
           <StatusCard
             title="🚀 Equal Distribution Pipeline"
@@ -305,6 +480,16 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         <h2 style={{ margin: "0 0 10px 0", color: "#333" }}>📊 {tableName}</h2>
         <ProgressSteps currentStep={currentStep} steps={pipelineSteps} />
       </div>
+
+      {/* API Status Panel */}
+      {apiTestResults && (
+        <APIStatusPanel
+          apiTestResults={apiTestResults}
+          isVisible={showApiStatus}
+          onToggle={() => setShowApiStatus(!showApiStatus)}
+          onRefreshTests={testApiKeys}
+        />
+      )}
 
       {/* Status Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px", marginBottom: "20px" }}>
@@ -331,14 +516,34 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         )}
       </div>
 
-      {/* Data Loss Warning */}
+      {/* Data Loss Warning with API Status Link */}
       {keyUsageInfo && keyUsageInfo.dataLoss > 0 && (
-        <StatusCard
-          title="⚠️ Cảnh báo mất dữ liệu"
-          status={`Mất ${keyUsageInfo.dataLoss} records trong quá trình xử lý`}
-          details={`Expected: ${keyUsageInfo.totalRecords}, Processed: ${keyUsageInfo.processedRecords}`}
-          type="warning"
-        />
+        <div style={{ marginBottom: "20px" }}>
+          <StatusCard
+            title="⚠️ Cảnh báo mất dữ liệu"
+            status={`Mất ${keyUsageInfo.dataLoss} records trong quá trình xử lý`}
+            details={`Expected: ${keyUsageInfo.totalRecords}, Processed: ${keyUsageInfo.processedRecords}`}
+            type="warning"
+          />
+
+          <div style={{ textAlign: "center", marginTop: "10px" }}>
+            <button
+              onClick={() => setShowApiStatus(true)}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#ffc107",
+                color: "#856404",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: "500",
+              }}
+            >
+              🔍 Xem API nào gây mất dữ liệu
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Error State */}
@@ -382,6 +587,9 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
               </button>
               <button onClick={() => testTableDataSample(tableId, 5)} style={{ padding: "6px 12px", fontSize: "11px" }}>
                 📊 Sample
+              </button>
+              <button onClick={testApiKeys} style={{ padding: "6px 12px", fontSize: "11px" }}>
+                🔑 Test APIs
               </button>
               <button onClick={() => window.location.reload()} style={{ padding: "6px 12px", fontSize: "11px" }}>
                 🔄 Reload
@@ -439,7 +647,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
               <span style={{ color: "#4caf50" }}>
                 ✅ Sẵn sàng! AI đã phân tích {tableData.length} records qua Equal Distribution Pipeline.
                 {keyUsageInfo && keyUsageInfo.dataLoss > 0 && (
-                  <span style={{ color: "#ff9800" }}> (⚠️ Mất {keyUsageInfo.dataLoss} records trong xử lý)</span>
+                  <span style={{ color: "#ff9800" }}> (⚠️ Mất {keyUsageInfo.dataLoss} records do API lỗi)</span>
                 )}
               </span>
             ) : (
@@ -488,6 +696,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
             <div style={{ fontSize: "12px", color: "#666" }}>
               {keyUsageInfo && `${keyUsageInfo.processedRecords}/${keyUsageInfo.totalRecords} records`}
+              {apiTestResults && ` | ${apiTestResults.workingKeys}/${apiTestResults.totalKeys} APIs`}
             </div>
           </div>
 
@@ -508,6 +717,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
                 <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
                   📊 Dựa trên {keyUsageInfo.processedRecords}/{keyUsageInfo.totalRecords} records qua Equal Distribution
                   Pipeline
+                  {apiTestResults && ` với ${apiTestResults.workingKeys}/${apiTestResults.totalKeys} working APIs`}
                 </div>
               )}
             </div>
