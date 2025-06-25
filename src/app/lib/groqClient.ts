@@ -10,13 +10,42 @@ const API_KEYS = [
 ].filter((key) => key && !key.includes("account") && key.startsWith("gsk_"))
 
 const AVAILABLE_MODELS = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-  "llama3-70b-8192",
-  "llama3-8b-8192",
-  "mixtral-8x7b-32768",
-  "gemma-7b-it",
+  "llama-3.3-70b-versatile", // Chỉ dùng model này
 ]
+
+// Function ước tính số tokens (1 token ≈ 4 characters)
+const estimateTokens = (text: string): number => {
+  return Math.ceil(text.length / 4)
+}
+
+// Function chia dữ liệu theo token limit
+const chunkDataByTokens = (data: any[], maxTokensPerChunk = 20000): any[][] => {
+  const chunks: any[][] = []
+  let currentChunk: any[] = []
+  let currentTokens = 0
+
+  for (const record of data) {
+    const recordText = JSON.stringify(record, null, 1)
+    const recordTokens = estimateTokens(recordText)
+
+    // Nếu thêm record này vào chunk hiện tại sẽ vượt quá limit
+    if (currentTokens + recordTokens > maxTokensPerChunk && currentChunk.length > 0) {
+      chunks.push([...currentChunk])
+      currentChunk = [record]
+      currentTokens = recordTokens
+    } else {
+      currentChunk.push(record)
+      currentTokens += recordTokens
+    }
+  }
+
+  // Thêm chunk cuối cùng nếu có
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk)
+  }
+
+  return chunks
+}
 
 const createGroqClient = (apiKey: string): Groq => {
   return new Groq({
@@ -36,7 +65,7 @@ const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: st
       try {
         const completion = (await Promise.race([
           groq.chat.completions.create({
-            model: model,
+            model: "llama-3.3-70b-versatile", // Chỉ dùng model này
             messages: [
               {
                 role: "user",
@@ -44,9 +73,9 @@ const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: st
               },
             ],
             temperature: 0.7,
-            max_tokens: 8000,
+            max_tokens: 25000, // Tăng lên 25000
           }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 45s")), 45000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 90s")), 90000)), // Tăng timeout
         ])) as any
 
         // Thêm null checks
@@ -111,17 +140,17 @@ CHỈ TRẢ VỀ DỮ LIỆU ĐÃ OPTIMIZE (JSON format), không có text thêm:
       try {
         const completion = (await Promise.race([
           groq.chat.completions.create({
-            model: model,
+            model: "llama-3.3-70b-versatile", // Chỉ dùng model này
             messages: [
               {
                 role: "user",
                 content: optimizePrompt,
               },
             ],
-            temperature: 0.1, // Thấp để đảm bảo consistency
-            max_tokens: 4000,
+            temperature: 0.1,
+            max_tokens: 25000, // Tăng lên 25000
           }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 30s")), 30000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 60s")), 60000)), // Tăng timeout
         ])) as any
 
         // Thêm null checks
@@ -183,15 +212,18 @@ export const preprocessDataWithPipeline = async (
       throw new Error("Không có API keys hợp lệ")
     }
 
-    // BƯỚC 1: Chia dữ liệu thành chunks
-    const chunkSize = Math.ceil(data.length / Math.max(API_KEYS.length - 1, 1)) // Giữ lại 1 key cho phân tích cuối
-    const chunks = []
+    // BƯỚC 1: Chia dữ liệu thành chunks theo token limit
+    console.log(`📊 BƯỚC 1: Chia dữ liệu theo token limit (20000 tokens/chunk)`)
+    const chunks = chunkDataByTokens(data, 20000)
 
-    for (let i = 0; i < data.length; i += chunkSize) {
-      chunks.push(data.slice(i, i + chunkSize))
-    }
+    // Log thông tin chi tiết về chunks
+    chunks.forEach((chunk, index) => {
+      const chunkText = JSON.stringify(chunk, null, 1)
+      const estimatedTokens = estimateTokens(chunkText)
+      console.log(`📊 Chunk ${index + 1}: ${chunk.length} records, ~${estimatedTokens} tokens`)
+    })
 
-    console.log(`📊 BƯỚC 1: Chia ${data.length} records thành ${chunks.length} chunks`)
+    console.log(`📊 Tổng cộng: ${data.length} records → ${chunks.length} chunks (tối ưu theo 20000 tokens)`)
 
     // BƯỚC 2: Optimize từng chunk song song
     const optimizePromises = chunks.map((chunk, index) => {
@@ -265,7 +297,7 @@ Trả lời bằng tiếng Việt, chi tiết và có cấu trúc.`
       failedKeys: failedOptimizes.length,
       successRate: `${Math.round((successfulOptimizes.length / optimizeResults.length) * 100)}%`,
       chunks: chunks.length,
-      recordsPerChunk: chunkSize,
+      recordsPerChunk: 0, //chunkSize,
       finalDataSize: combinedOptimizedData.length,
     }
 
@@ -362,7 +394,7 @@ export const testAllApiKeys = async (): Promise<{
       const groq = createGroqClient(apiKey)
 
       const testCompletion = await groq.chat.completions.create({
-        model: "llama-3.1-8b-instant",
+        model: "llama-3.3-70b-versatile", // Chỉ test model này
         messages: [
           {
             role: "user",
@@ -370,7 +402,7 @@ export const testAllApiKeys = async (): Promise<{
           },
         ],
         temperature: 0.1,
-        max_tokens: 10,
+        max_tokens: 50, // Nhỏ cho test
       })
 
       // Thêm null checks
