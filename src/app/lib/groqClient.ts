@@ -303,7 +303,7 @@ const extractCompleteFieldValue = (value: unknown, fieldName?: string): string =
   return finalResult
 }
 
-// 🔥 ZERO DATA LOSS: Enhanced CSV conversion với complete data preservation
+// 🔥 ZERO DATA LOSS: Enhanced CSV conversion với complete data preservation + FIELD ORDER FIX
 const convertToEnhancedCSV = (
   data: Array<{ recordId: string; fields: Record<string, unknown> }>,
   fieldMetadata?: { fieldTypes: Record<string, string>; fieldNames: string[] },
@@ -314,11 +314,33 @@ const convertToEnhancedCSV = (
 } => {
   if (data.length === 0) return { csvContent: "", conversionReport: "No data", stats: {} }
 
-  console.log(`📊 ===== ZERO DATA LOSS CSV CONVERSION =====`)
+  console.log(`📊 ===== ZERO DATA LOSS CSV CONVERSION (FIELD ORDER FIXED) =====`)
   console.log(`📊 Converting ${data.length} records with COMPLETE data preservation...`)
 
-  // 🔍 STEP 1: Comprehensive field analysis
-  const allFieldNames = new Set<string>()
+  // 🔥 FIX: Use field metadata order if available, otherwise analyze data
+  let orderedFieldNames: string[] = []
+
+  if (fieldMetadata && fieldMetadata.fieldNames && fieldMetadata.fieldNames.length > 0) {
+    // Use the correct field order from metadata
+    orderedFieldNames = [...fieldMetadata.fieldNames]
+    console.log(`📋 Using field order from metadata: ${orderedFieldNames.length} fields`)
+    console.log(
+      `🔧 Field order: ${orderedFieldNames.slice(0, 5).join(", ")}${orderedFieldNames.length > 5 ? "..." : ""}`,
+    )
+  } else {
+    // Fallback: analyze data to determine field order
+    console.log(`⚠️ No field metadata provided, analyzing data for field order...`)
+    const allFieldNames = new Set<string>()
+    data.forEach((record) => {
+      Object.keys(record.fields).forEach((fieldName) => {
+        allFieldNames.add(fieldName)
+      })
+    })
+    orderedFieldNames = Array.from(allFieldNames).sort()
+    console.log(`📋 Determined field order from data: ${orderedFieldNames.length} fields`)
+  }
+
+  // 🔍 STEP 1: Comprehensive field analysis với correct order
   const fieldValueSamples: Record<string, unknown[]> = {}
   const fieldStats: Record<
     string,
@@ -331,10 +353,23 @@ const convertToEnhancedCSV = (
     }
   > = {}
 
+  // Initialize field stats in correct order
+  orderedFieldNames.forEach((fieldName) => {
+    fieldValueSamples[fieldName] = []
+    fieldStats[fieldName] = {
+      totalValues: 0,
+      emptyValues: 0,
+      uniqueTypes: new Set(),
+      extractedValues: 0,
+      preservedValues: 0,
+    }
+  })
+
   // 🔥 FIXED: Data preservation calculation - only count actual data, not empty fields
   data.forEach((record, recordIndex) => {
-    Object.entries(record.fields).forEach(([fieldName, fieldValue]) => {
-      allFieldNames.add(fieldName)
+    // Process fields in the correct order
+    orderedFieldNames.forEach((fieldName) => {
+      const fieldValue = record.fields[fieldName] // Get value for this specific field
 
       if (!fieldValueSamples[fieldName]) {
         fieldValueSamples[fieldName] = []
@@ -366,43 +401,45 @@ const convertToEnhancedCSV = (
         console.log(`🔍 Field "${fieldName}" sample ${fieldValueSamples[fieldName].length}:`, fieldValue)
       }
     })
+
+    // Check for any extra fields not in the ordered list
+    Object.keys(record.fields).forEach((fieldName) => {
+      if (!orderedFieldNames.includes(fieldName)) {
+        console.warn(`⚠️ Extra field found: "${fieldName}" (not in metadata order)`)
+        orderedFieldNames.push(fieldName) // Add to end
+        fieldValueSamples[fieldName] = []
+        fieldStats[fieldName] = {
+          totalValues: 0,
+          emptyValues: 0,
+          uniqueTypes: new Set(),
+          extractedValues: 0,
+          preservedValues: 0,
+        }
+      }
+    })
   })
 
-  // 🔍 STEP 2: Create clean field names mapping
+  // 🔍 STEP 2: Create clean field names mapping (preserve order)
   const fieldNameMapping: Record<string, string> = {}
   const cleanFieldNames: string[] = []
 
-  if (fieldMetadata && fieldMetadata.fieldNames) {
-    // Use provided field metadata
-    fieldMetadata.fieldNames.forEach((fieldName) => {
-      fieldNameMapping[fieldName] = fieldName
-      cleanFieldNames.push(fieldName)
-    })
-    console.log(`📋 Using provided field metadata: ${fieldMetadata.fieldNames.length} fields`)
-  } else {
-    // Auto-clean field names
-    Array.from(allFieldNames)
-      .sort()
-      .forEach((fieldName) => {
-        const cleanName = cleanFieldName(fieldName)
-        fieldNameMapping[fieldName] = cleanName
-        cleanFieldNames.push(cleanName)
-      })
-    console.log(`📋 Auto-cleaned ${cleanFieldNames.length} field names`)
-  }
-
-  console.log(`🔧 Field name mapping:`)
-  Object.entries(fieldNameMapping).forEach(([original, cleaned]) => {
-    if (original !== cleaned) {
-      console.log(`  "${original}" → "${cleaned}"`)
-    }
+  orderedFieldNames.forEach((fieldName) => {
+    const cleanName = cleanFieldName(fieldName)
+    fieldNameMapping[fieldName] = cleanName
+    cleanFieldNames.push(cleanName)
   })
 
-  // 🔍 STEP 3: Create CSV headers
+  console.log(`🔧 Field name mapping (in correct order):`)
+  orderedFieldNames.forEach((original, index) => {
+    const cleaned = fieldNameMapping[original]
+    console.log(`  ${index + 1}. "${original}" → "${cleaned}"`)
+  })
+
+  // 🔍 STEP 3: Create CSV headers (in correct order)
   const headers = ["STT", "RecordID", ...cleanFieldNames]
   const csvHeaders = headers.map((h) => `"${h}"`).join(",")
 
-  // 🔍 STEP 4: Convert records với ZERO DATA LOSS
+  // 🔍 STEP 4: Convert records với ZERO DATA LOSS + CORRECT FIELD ORDER
   let totalExtractedValues = 0
   let totalPreservedValues = 0
   let extractionErrors = 0
@@ -411,45 +448,44 @@ const convertToEnhancedCSV = (
     const values = [
       `"${recordIndex + 1}"`, // STT
       `"${record.recordId}"`, // RecordID
-      ...Array.from(allFieldNames)
-        .sort()
-        .map((originalFieldName) => {
-          const rawValue = record.fields[originalFieldName]
+      // 🔥 CRITICAL FIX: Process fields in the EXACT order from metadata
+      ...orderedFieldNames.map((originalFieldName) => {
+        const rawValue = record.fields[originalFieldName]
 
-          try {
-            // 🔥 USE ENHANCED EXTRACTION - PRESERVE EVERYTHING
-            const extractedValue = extractCompleteFieldValue(rawValue, originalFieldName)
+        try {
+          // 🔥 USE ENHANCED EXTRACTION - PRESERVE EVERYTHING
+          const extractedValue = extractCompleteFieldValue(rawValue, originalFieldName)
 
-            // Track extraction success
-            if (rawValue !== null && rawValue !== undefined) {
-              totalPreservedValues++
-            }
-
-            // 🔥 ALWAYS PRESERVE SOMETHING - never return empty
-            if (extractedValue && extractedValue.trim() !== "") {
-              fieldStats[originalFieldName].extractedValues++
-              totalExtractedValues++
-
-              // 🔥 PROPER CSV ESCAPING - PRESERVE ALL DATA
-              const escapedValue = extractedValue
-                .replace(/"/g, '""') // Escape quotes
-                .replace(/\r?\n/g, " ") // Replace newlines with spaces
-                .trim()
-
-              return `"${escapedValue}"`
-            }
-
-            // 🔥 EVEN "EMPTY" VALUES GET PRESERVED WITH TYPE INFO
-            return `"EMPTY_FIELD"`
-          } catch (error) {
-            extractionErrors++
-            console.error(`❌ Extraction error for record ${recordIndex + 1}, field "${originalFieldName}":`, error)
-
-            // 🔥 EMERGENCY ABSOLUTE PRESERVATION
-            const emergencyValue = String(rawValue).substring(0, 200).replace(/"/g, '""')
-            return `"EMERGENCY_PRESERVED:${emergencyValue}"`
+          // Track extraction success
+          if (rawValue !== null && rawValue !== undefined) {
+            totalPreservedValues++
           }
-        }),
+
+          // 🔥 ALWAYS PRESERVE SOMETHING - never return empty
+          if (extractedValue && extractedValue.trim() !== "") {
+            fieldStats[originalFieldName].extractedValues++
+            totalExtractedValues++
+
+            // 🔥 PROPER CSV ESCAPING - PRESERVE ALL DATA
+            const escapedValue = extractedValue
+              .replace(/"/g, '""') // Escape quotes
+              .replace(/\r?\n/g, " ") // Replace newlines with spaces
+              .trim()
+
+            return `"${escapedValue}"`
+          }
+
+          // 🔥 EVEN "EMPTY" VALUES GET PRESERVED WITH TYPE INFO
+          return `"EMPTY_FIELD"`
+        } catch (error) {
+          extractionErrors++
+          console.error(`❌ Extraction error for record ${recordIndex + 1}, field "${originalFieldName}":`, error)
+
+          // 🔥 EMERGENCY ABSOLUTE PRESERVATION
+          const emergencyValue = String(rawValue).substring(0, 200).replace(/"/g, '""')
+          return `"EMERGENCY_PRESERVED:${emergencyValue}"`
+        }
+      }),
     ]
 
     return values.join(",")
@@ -477,47 +513,55 @@ const convertToEnhancedCSV = (
   const extractionSuccessRate =
     totalPreservedValues > 0 ? ((totalExtractedValues / totalPreservedValues) * 100).toFixed(1) : "100.0"
   const conversionReport = `
-📊 ZERO DATA LOSS CSV CONVERSION REPORT:
+📊 ZERO DATA LOSS CSV CONVERSION REPORT (FIELD ORDER FIXED):
   ✅ Total records: ${data.length}
-  ✅ Total fields: ${allFieldNames.size}
+  ✅ Total fields: ${orderedFieldNames.length}
   ✅ Clean field names: ${cleanFieldNames.length}
   ✅ CSV size: ${csvSize} characters
   ✅ Estimated tokens: ${estimateTokens(csvContent)}
   ✅ Compression ratio: ${compressionRatio}% smaller than JSON
   
 🔍 DATA PRESERVATION METRICS:
-  📊 Total possible values: ${data.length * allFieldNames.size}
+  📊 Total possible values: ${data.length * orderedFieldNames.length}
   ✅ Values preserved: ${totalPreservedValues} (${dataPreservationRate}%)
   ✅ Values extracted: ${totalExtractedValues} (${extractionSuccessRate}% of preserved)
   ❌ Extraction errors: ${extractionErrors}
   
-📋 Field Extraction Quality:
-${Array.from(allFieldNames)
-  .sort()
-  .map((fieldName) => {
+🔧 FIELD ORDER PRESERVATION:
+  📋 Field order source: ${fieldMetadata ? "Metadata (correct order)" : "Data analysis (may be incorrect)"}
+  ✅ Fields processed in order: ${orderedFieldNames.slice(0, 3).join(", ")}${orderedFieldNames.length > 3 ? "..." : ""}
+  🎯 Order consistency: ${fieldMetadata ? "✅ Guaranteed correct" : "⚠️ Best effort from data"}
+  
+📋 Field Extraction Quality (in correct order):
+${orderedFieldNames
+  .slice(0, 10)
+  .map((fieldName, index) => {
     const stats = fieldStats[fieldName]
     const preservationRate = ((stats.preservedValues / stats.totalValues) * 100).toFixed(1)
     const extractionRate =
       stats.preservedValues > 0 ? ((stats.extractedValues / stats.preservedValues) * 100).toFixed(1) : "0"
-    return `  • "${fieldNameMapping[fieldName]}": ${preservationRate}% preserved, ${extractionRate}% extracted`
+    return `  ${index + 1}. "${fieldNameMapping[fieldName]}": ${preservationRate}% preserved, ${extractionRate}% extracted`
   })
   .join("\n")}
+${orderedFieldNames.length > 10 ? `  ... and ${orderedFieldNames.length - 10} more fields` : ""}
 
-🎯 ZERO DATA LOSS GUARANTEE:
+🎯 ZERO DATA LOSS + FIELD ORDER GUARANTEE:
   ${dataPreservationRate === "100.0" ? "✅ PERFECT: No data loss detected" : `⚠️ WARNING: ${100 - Number.parseFloat(dataPreservationRate)}% data loss detected`}
   ${extractionErrors === 0 ? "✅ PERFECT: No extraction errors" : `⚠️ WARNING: ${extractionErrors} extraction errors`}
   ${Number.parseFloat(extractionSuccessRate) >= 95 ? "✅ EXCELLENT: High extraction success rate" : `⚠️ WARNING: Low extraction success rate`}
+  ${fieldMetadata ? "✅ PERFECT: Field order preserved from metadata" : "⚠️ WARNING: Field order may be incorrect (no metadata)"}
   `
 
-  console.log(`✅ ===== ZERO DATA LOSS CSV CONVERSION COMPLETE =====`)
+  console.log(`✅ ===== ZERO DATA LOSS CSV CONVERSION COMPLETE (FIELD ORDER FIXED) =====`)
   console.log(`📊 Records: ${data.length}`)
-  console.log(`📋 Fields: ${allFieldNames.size}`)
+  console.log(`📋 Fields: ${orderedFieldNames.length} (in correct order)`)
   console.log(`📄 CSV size: ${csvSize} characters`)
   console.log(`🎯 Estimated tokens: ${estimateTokens(csvContent)}`)
   console.log(`🔍 Data preservation rate: ${dataPreservationRate}%`)
   console.log(`🔍 Extraction success rate: ${extractionSuccessRate}%`)
+  console.log(`🔧 Field order: ${fieldMetadata ? "✅ Preserved from metadata" : "⚠️ Best effort from data"}`)
   console.log(
-    `${Number.parseFloat(dataPreservationRate) === 100 && extractionErrors === 0 ? "✅ ZERO DATA LOSS ACHIEVED!" : "⚠️ DATA LOSS DETECTED - REVIEW REQUIRED"}`,
+    `${Number.parseFloat(dataPreservationRate) === 100 && extractionErrors === 0 && fieldMetadata ? "🎉 PERFECT: ZERO DATA LOSS + CORRECT FIELD ORDER!" : "⚠️ ISSUES DETECTED - REVIEW REQUIRED"}`,
   )
   console.log(`===============================================`)
 
@@ -526,8 +570,8 @@ ${Array.from(allFieldNames)
     conversionReport,
     stats: {
       totalRecords: data.length,
-      totalFields: allFieldNames.size,
-      totalPossibleValues: data.length * allFieldNames.size,
+      totalFields: orderedFieldNames.length,
+      totalPossibleValues: data.length * orderedFieldNames.length,
       totalPreservedValues,
       totalExtractedValues,
       extractionErrors,
@@ -537,6 +581,8 @@ ${Array.from(allFieldNames)
       estimatedTokens: estimateTokens(csvContent),
       fieldStats,
       fieldNameMapping,
+      fieldOrderPreserved: !!fieldMetadata,
+      orderedFieldNames,
     },
   }
 }
@@ -794,50 +840,60 @@ const analyzeEnhancedCSVWithRandomAPI = async (
 
     const groq = createGroqClient(selectedAPI.apiKey)
 
-    // 🔥 NEW: Enhanced CSV analysis prompt với zero data loss focus
-    const analysisPrompt = `Phân tích toàn bộ dữ liệu CSV từ bảng "${tableName}" (${recordCount} records) với ZERO DATA LOSS guarantee:
+    // 🔥 NEW: Enhanced CSV analysis prompt với zero data loss focus + field order verification
+    const analysisPrompt = `Phân tích toàn bộ dữ liệu CSV từ bảng "${tableName}" (${recordCount} records) với ZERO DATA LOSS guarantee và CORRECT FIELD ORDER:
 
 ${conversionReport}
 
-Dữ liệu CSV (đã được xử lý với complete data preservation):
+Dữ liệu CSV (đã được xử lý với complete data preservation + field order fix):
 ${csvContent}
 
-Thực hiện phân tích toàn diện với focus vào data completeness:
+Thực hiện phân tích toàn diện với focus vào data completeness và field order accuracy:
 
-1. **Kiểm tra Data Integrity:**
+1. **Kiểm tra Data Integrity + Field Order:**
    - Đếm chính xác số records trong CSV (phải = ${recordCount})
-   - Verify tất cả fields đã được preserve
-   - Check data quality và completeness
+   - Verify tất cả fields đã được preserve theo đúng thứ tự
+   - Check field order consistency (chuột không lẫn với bàn phím)
+   - Verify data quality và completeness
 
-2. **Thống kê chi tiết từ CSV:**
-   - Phân tích từng column với complete data
+2. **Field Order Verification:**
+   - Kiểm tra xem các trường có bị đảo lộn không
+   - Verify field names và positions
+   - Check for field mapping consistency
+   - Identify any field order issues
+
+3. **Thống kê chi tiết từ CSV:**
+   - Phân tích từng column với complete data theo đúng order
    - Thống kê phân bố và frequency
    - Identify patterns và relationships
    - Extract insights từ preserved data
 
-3. **Business Analysis:**
+4. **Business Analysis:**
    - Insights quan trọng từ complete dataset
    - Trends và patterns từ full data
    - Actionable recommendations
    - Data-driven conclusions
 
-4. **Data Quality Assessment:**
+5. **Data Quality Assessment:**
    - Đánh giá completeness của từng field
    - Identify missing data patterns
    - Data consistency analysis
+   - Field order accuracy assessment
 
-5. **Kết luận:**
+6. **Kết luận:**
    - Tóm tắt findings chính từ complete data
    - Data reliability assessment
+   - Field order accuracy confirmation
    - Key business insights
 
-**QUAN TRỌNG - ZERO DATA LOSS VERIFICATION**: 
+**QUAN TRỌNG - ZERO DATA LOSS + FIELD ORDER VERIFICATION**: 
 - Đếm chính xác số records từ CSV (phải = ${recordCount})
 - Phân tích dựa 100% trên dữ liệu CSV đã preserve
+- Verify field order không bị đảo lộn
 - Không bỏ qua bất kỳ data nào
-- Verify data integrity trong analysis
+- Confirm field mapping accuracy
 
-Trả lời chi tiết bằng tiếng Việt với format rõ ràng và focus vào complete data analysis:`
+Trả lời chi tiết bằng tiếng Việt với format rõ ràng và focus vào complete data analysis + field order verification:`
 
     const promptTokens = estimateTokens(analysisPrompt)
     console.log(`📤 Sending enhanced CSV analysis request: ${promptTokens} input tokens`)
@@ -870,7 +926,7 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng và focus v�
 
     console.log(`📊 OUTPUT: ${outputTokens} tokens`)
     console.log(`⚡ Total processing time: ${responseTime}ms`)
-    console.log(`✅ SUCCESS: Analyzed ${recordCount} records with Enhanced CSV (zero data loss)`)
+    console.log(`✅ SUCCESS: Analyzed ${recordCount} records with Enhanced CSV (zero data loss + field order fix)`)
     console.log(`📋 Analysis preview: ${analysis.substring(0, 150)}...`)
     console.log(`===== END ENHANCED CSV ANALYSIS =====\n`)
 
@@ -898,29 +954,31 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng và focus v�
   }
 }
 
-// 🔥 MAIN: Enhanced CSV Pipeline với ZERO DATA LOSS
+// 🔥 MAIN: Enhanced CSV Pipeline với ZERO DATA LOSS + FIELD ORDER FIX
 export const preprocessDataWithPipeline = async (
   data: any[],
   tableName: string,
   fieldMetadata?: { fieldTypes: Record<string, string>; fieldNames: string[] },
 ): Promise<{ success: boolean; optimizedData: string; analysis: string; keyUsage: any }> => {
   try {
-    console.log(`🚀 Enhanced CSV Pipeline (ZERO DATA LOSS) với ${data.length} records - Model: ${SINGLE_MODEL}`)
+    console.log(
+      `🚀 Enhanced CSV Pipeline (ZERO DATA LOSS + FIELD ORDER FIX) với ${data.length} records - Model: ${SINGLE_MODEL}`,
+    )
 
     if (!API_KEYS || API_KEYS.length === 0) {
       throw new Error("Cần ít nhất 1 API key")
     }
 
-    // 🔥 BƯỚC 1: Enhanced CSV conversion với zero data loss
-    console.log(`📊 BƯỚC 1: Enhanced CSV conversion với ZERO DATA LOSS guarantee...`)
+    // 🔥 BƯỚC 1: Enhanced CSV conversion với zero data loss + field order preservation
+    console.log(`📊 BƯỚC 1: Enhanced CSV conversion với ZERO DATA LOSS + FIELD ORDER FIX...`)
     const { csvContent, conversionReport, stats } = convertToEnhancedCSV(data, fieldMetadata)
 
     if (!csvContent) {
       throw new Error("Không thể tạo CSV content")
     }
 
-    // 🔥 BƯỚC 2: Validate CSV integrity
-    console.log(`🔍 BƯỚC 2: Validating CSV integrity...`)
+    // 🔥 BƯỚC 2: Validate CSV integrity + field order
+    console.log(`🔍 BƯỚC 2: Validating CSV integrity + field order...`)
     const integrityValidation = validateCSVIntegrity(data, csvContent)
 
     if (!integrityValidation.isValid) {
@@ -934,8 +992,16 @@ export const preprocessDataWithPipeline = async (
       console.error(`This violates the ZERO DATA LOSS requirement!`)
     }
 
-    // 🔥 BƯỚC 3: Enhanced CSV analysis
-    console.log(`🤖 BƯỚC 3: Enhanced CSV analysis với random API...`)
+    // 🔥 CRITICAL: Check for field order preservation
+    if (!stats.fieldOrderPreserved) {
+      console.warn(`⚠️ FIELD ORDER WARNING: No metadata provided, field order may be incorrect!`)
+      console.warn(`This could cause field mixing (e.g., mouse data in keyboard field)!`)
+    } else {
+      console.log(`✅ FIELD ORDER PRESERVED: Using metadata field order`)
+    }
+
+    // 🔥 BƯỚC 3: Enhanced CSV analysis với field order verification
+    console.log(`🤖 BƯỚC 3: Enhanced CSV analysis với random API + field order verification...`)
     const analysisResult = await analyzeEnhancedCSVWithRandomAPI(csvContent, tableName, data.length, conversionReport)
 
     if (!analysisResult.success) {
@@ -946,10 +1012,10 @@ export const preprocessDataWithPipeline = async (
         analysis: analysisResult.analysis,
         keyUsage: {
           error: true,
-          format: "Enhanced CSV",
+          format: "Enhanced CSV (Field Order Fixed)",
           fallback: true,
           model: SINGLE_MODEL,
-          strategy: "Enhanced CSV (Zero Data Loss)",
+          strategy: "Enhanced CSV (Zero Data Loss + Field Order Fix)",
           errorDetails: analysisResult.error,
           dataIntegrity: integrityValidation,
           stats: stats,
@@ -957,7 +1023,7 @@ export const preprocessDataWithPipeline = async (
       }
     }
 
-    // 🔥 SUCCESS: Return enhanced CSV results
+    // 🔥 SUCCESS: Return enhanced CSV results with field order fix
     const keyUsage = {
       totalKeys: API_KEYS.length,
       usedAPI: analysisResult.apiDetails.keyIndex,
@@ -965,9 +1031,9 @@ export const preprocessDataWithPipeline = async (
       totalRecords: data.length,
       processedRecords: data.length,
       dataLoss: Math.max(0, 100 - stats.dataPreservationRate),
-      format: "Enhanced CSV (Zero Data Loss)",
+      format: "Enhanced CSV (Zero Data Loss + Field Order Fixed)",
       model: SINGLE_MODEL,
-      strategy: "Enhanced CSV Direct Analysis",
+      strategy: "Enhanced CSV Direct Analysis + Field Order Preservation",
       responseTime: analysisResult.apiDetails.responseTime,
       inputTokens: analysisResult.apiDetails.inputTokens,
       outputTokens: analysisResult.apiDetails.outputTokens,
@@ -975,16 +1041,22 @@ export const preprocessDataWithPipeline = async (
       apiPreview: analysisResult.apiDetails.preview,
       dataIntegrity: integrityValidation,
       stats: stats,
+      fieldOrderFixed: stats.fieldOrderPreserved,
     }
 
-    console.log(`✅ Enhanced CSV Pipeline Complete:`)
+    console.log(`✅ Enhanced CSV Pipeline Complete (with field order fix):`)
     console.log(`  📊 Records: ${data.length} (${stats.dataPreservationRate}% preserved)`)
     console.log(`  🎯 API used: ${analysisResult.apiDetails.keyIndex}`)
     console.log(`  ⚡ Time: ${analysisResult.apiDetails.responseTime}ms`)
     console.log(`  🎫 Tokens: ${analysisResult.apiDetails.totalTokens}`)
     console.log(`  🔍 Data integrity: ${integrityValidation.isValid ? "✅ Valid" : "⚠️ Issues detected"}`)
-    console.log(`  📄 Format: Enhanced CSV (${stats.dataPreservationRate}% data preservation)`)
-    console.log(`  ${stats.dataPreservationRate === 100 ? "✅ ZERO DATA LOSS ACHIEVED!" : "⚠️ DATA LOSS DETECTED!"}`)
+    console.log(
+      `  🔧 Field order: ${stats.fieldOrderPreserved ? "✅ Preserved from metadata" : "⚠️ Best effort from data"}`,
+    )
+    console.log(`  📄 Format: Enhanced CSV (${stats.dataPreservationRate}% data preservation + field order fix)`)
+    console.log(
+      `  ${stats.dataPreservationRate === 100 && stats.fieldOrderPreserved ? "🎉 PERFECT: ZERO DATA LOSS + CORRECT FIELD ORDER!" : "⚠️ ISSUES DETECTED!"}`,
+    )
 
     return {
       success: true,
@@ -1002,17 +1074,17 @@ export const preprocessDataWithPipeline = async (
       analysis: `❌ Pipeline error với ${SINGLE_MODEL}: ${error}. Sử dụng enhanced CSV với ${data.length} records.`,
       keyUsage: {
         error: true,
-        format: "Enhanced CSV",
+        format: "Enhanced CSV (Field Order Fixed)",
         model: SINGLE_MODEL,
         fallback: true,
-        strategy: "Enhanced CSV (Zero Data Loss)",
+        strategy: "Enhanced CSV (Zero Data Loss + Field Order Fix)",
         dataIntegrity: { isValid: false, report: "Pipeline failed", issues: [String(error)] },
       },
     }
   }
 }
 
-// 🔥 UPDATED: Answer question với enhanced CSV
+// 🔥 UPDATED: Answer question với enhanced CSV + field order awareness
 export const answerQuestionWithOptimizedData = async (
   optimizedCSVData: string,
   tableName: string,
@@ -1035,7 +1107,7 @@ export const answerQuestionWithOptimizedData = async (
     const truncatedCSV =
       optimizedCSVData.length > maxCSVLength ? optimizedCSVData.substring(0, maxCSVLength) + "..." : optimizedCSVData
 
-    const questionPrompt = `Dữ liệu Enhanced CSV từ bảng "${tableName}" (${originalRecordCount} records) với ZERO DATA LOSS:
+    const questionPrompt = `Dữ liệu Enhanced CSV từ bảng "${tableName}" (${originalRecordCount} records) với ZERO DATA LOSS + CORRECT FIELD ORDER:
 
 ${truncatedCSV}
 
@@ -1043,16 +1115,18 @@ Câu hỏi: ${question}
 
 Phân tích dữ liệu CSV và trả lời chi tiết bằng tiếng Việt:
 
-1. **Trả lời trực tiếp câu hỏi** dựa trên complete CSV data
-2. **Dẫn chứng cụ thể** từ CSV rows và columns
+1. **Trả lời trực tiếp câu hỏi** dựa trên complete CSV data với correct field order
+2. **Dẫn chứng cụ thể** từ CSV rows và columns (verify field order accuracy)
 3. **Đếm chính xác** từ CSV data (verify với ${originalRecordCount} records)
-4. **Insights bổ sung** từ complete dataset
-5. **Data quality notes** nếu cần
+4. **Field order verification** - đảm bảo không nhầm lẫn giữa các trường
+5. **Insights bổ sung** từ complete dataset
+6. **Data quality notes** nếu cần
 
-**QUAN TRỌNG - ZERO DATA LOSS**: 
+**QUAN TRỌNG - ZERO DATA LOSS + FIELD ORDER ACCURACY**: 
 - Chỉ dựa vào dữ liệu thực tế trong CSV
 - Đếm chính xác từ CSV rows
 - Sử dụng complete data đã được preserve
+- Verify field order không bị đảo lộn
 - Không đoán mò hoặc tạo ra thông tin không có
 
 Trả lời:`
@@ -1074,7 +1148,7 @@ Trả lời:`
     }
 
     const answer = completion.choices[0].message.content
-    console.log(`✅ Question answered with enhanced CSV data (${responseTime}ms)`)
+    console.log(`✅ Question answered with enhanced CSV data + field order verification (${responseTime}ms)`)
 
     return answer
   } catch (error) {
@@ -1190,7 +1264,7 @@ export const testGroqAPI = async () => {
     success: result.success,
     message: result.message,
     workingModel: SINGLE_MODEL,
-    format: "Enhanced CSV (Zero Data Loss)",
+    format: "Enhanced CSV (Zero Data Loss + Field Order Fixed)",
   }
 }
 
@@ -1204,7 +1278,7 @@ export const getApiKeysInfo = () => {
     keysPreview: API_KEYS.map(
       (key, index) => `API ${index + 1}: ${key.substring(0, 10)}...${key.substring(key.length - 4)} (${SINGLE_MODEL})`,
     ),
-    format: "Enhanced CSV (Zero Data Loss)",
+    format: "Enhanced CSV (Zero Data Loss + Field Order Fixed)",
     model: SINGLE_MODEL,
   }
 }

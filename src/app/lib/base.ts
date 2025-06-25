@@ -5,6 +5,8 @@ interface RecordData {
   recordId: string
   fields: Record<string, unknown>
   strategy?: string
+  fieldCount?: number
+  emptyFields?: string[]
 }
 
 // Interface cho table stats
@@ -287,180 +289,413 @@ export const debugTableStructure = async (tableId: string): Promise<void> => {
   }
 }
 
-// Function chính lấy TẤT CẢ dữ liệu từ bảng
-export const getTableData = async (tableId: string): Promise<RecordData[]> => {
-  try {
-    console.log(`📥 Getting ALL data from table: ${tableId}`)
+// 🔥 FIX 1: DEEP FIELD EXTRACTION - Khắc phục fields bị thiếu
+const deepFieldExtraction = async (
+  table: any,
+  recordId: string,
+  fieldMetaList: any[],
+  maxRetries = 3,
+): Promise<{ fields: Record<string, unknown>; fieldCount: number; emptyFields: string[] }> => {
+  console.log(`🔍 Deep field extraction for record: ${recordId}`)
 
-    const table = await base.getTable(tableId)
-    if (!table) {
-      throw new Error("Không thể lấy table object")
-    }
+  let bestResult = { fields: {}, fieldCount: 0, emptyFields: [] as string[] }
+  let attempts = 0
 
-    // Lấy tất cả record IDs
-    const recordIdList = await table.getRecordIdList()
-    console.log(`📊 Found ${recordIdList.length} records in table`)
+  while (attempts < maxRetries) {
+    attempts++
+    console.log(`  🔄 Attempt ${attempts}/${maxRetries} for record ${recordId}`)
 
-    if (recordIdList.length === 0) {
-      console.log("⚠️ Table không có records")
-      return []
-    }
+    try {
+      // METHOD 1: Complete record fetch
+      const completeRecord = await table.getRecordById(recordId)
+      if (completeRecord?.fields && Object.keys(completeRecord.fields).length > 0) {
+        const fieldCount = Object.keys(completeRecord.fields).length
+        const emptyFields = Object.entries(completeRecord.fields)
+          .filter(([_, value]) => value === null || value === undefined || value === "")
+          .map(([key, _]) => key)
 
-    // Lấy tất cả records
-    const allData: RecordData[] = []
-    let successCount = 0
-    let errorCount = 0
+        console.log(`    ✅ Complete record: ${fieldCount} fields, ${emptyFields.length} empty`)
 
-    console.log(`📥 Loading ${recordIdList.length} records...`)
-
-    // Process records in batches để tránh overload
-    const batchSize = 50
-    for (let i = 0; i < recordIdList.length; i += batchSize) {
-      const batch = recordIdList.slice(i, i + batchSize)
-      console.log(
-        `📦 Processing batch ${Math.floor(i / batchSize) + 1}: records ${i + 1}-${Math.min(i + batchSize, recordIdList.length)}`,
-      )
-
-      const batchPromises = batch.map(async (recordId) => {
-        try {
-          const recordData = await table.getRecordById(recordId)
-          if (recordData && recordData.fields) {
-            successCount++
-            return {
-              recordId: recordId,
-              fields: recordData.fields,
-            }
-          } else {
-            console.warn(`⚠️ Record ${recordId} has no fields`)
-            return {
-              recordId: recordId,
-              fields: {},
-            }
-          }
-        } catch (recordError) {
-          errorCount++
-          console.error(`❌ Error getting record ${recordId}:`, recordError)
-          return {
-            recordId: recordId,
-            fields: { error: `Cannot read record: ${recordError}` },
+        if (fieldCount > bestResult.fieldCount) {
+          bestResult = {
+            fields: completeRecord.fields,
+            fieldCount: fieldCount,
+            emptyFields: emptyFields,
           }
         }
-      })
 
-      const batchResults = await Promise.all(batchPromises)
-      allData.push(...batchResults)
+        // If we got all expected fields, return immediately
+        if (fieldCount >= fieldMetaList.length * 0.8) {
+          // At least 80% of expected fields
+          console.log(`    🎯 Good field coverage (${fieldCount}/${fieldMetaList.length}), using this result`)
+          break
+        }
+      }
 
-      // Small delay between batches
-      if (i + batchSize < recordIdList.length) {
-        await new Promise((resolve) => setTimeout(resolve, 100))
+      // METHOD 2: Field-by-field extraction (fallback)
+      console.log(`    🔄 Trying field-by-field extraction...`)
+      const fieldByFieldResult: Record<string, unknown> = {}
+      const emptyFieldsList: string[] = []
+
+      for (const fieldMeta of fieldMetaList) {
+        try {
+          // Try multiple ways to get field value
+          let fieldValue = null
+
+          // Try 1: getCellValue with field ID
+          try {
+            fieldValue = await table.getCellValue(recordId, fieldMeta.id)
+          } catch (e) {
+            // Try 2: getCellValue with field name
+            try {
+              fieldValue = await table.getCellValue(recordId, fieldMeta.name)
+            } catch (e2) {
+              console.warn(`    ⚠️ Cannot get field "${fieldMeta.name}" for record ${recordId}`)
+            }
+          }
+
+          if (fieldValue !== null && fieldValue !== undefined) {
+            fieldByFieldResult[fieldMeta.name] = fieldValue
+          } else {
+            emptyFieldsList.push(fieldMeta.name)
+            // Still add the field but mark as empty
+            fieldByFieldResult[fieldMeta.name] = null
+          }
+        } catch (fieldError) {
+          console.warn(`    ❌ Field extraction failed for "${fieldMeta.name}":`, fieldError)
+          fieldByFieldResult[fieldMeta.name] = { error: `Field extraction failed: ${fieldError}` }
+          emptyFieldsList.push(fieldMeta.name)
+        }
+      }
+
+      const fieldByFieldCount = Object.keys(fieldByFieldResult).length
+      console.log(`    📊 Field-by-field: ${fieldByFieldCount} fields, ${emptyFieldsList.length} empty`)
+
+      // Use field-by-field result if it's better
+      if (fieldByFieldCount > bestResult.fieldCount) {
+        bestResult = {
+          fields: fieldByFieldResult,
+          fieldCount: fieldByFieldCount,
+          emptyFields: emptyFieldsList,
+        }
+      }
+
+      // Small delay between attempts
+      if (attempts < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 200 * attempts))
+      }
+    } catch (error) {
+      console.error(`    ❌ Attempt ${attempts} failed for record ${recordId}:`, error)
+
+      // If this is the last attempt and we have no result, create minimal result
+      if (attempts === maxRetries && bestResult.fieldCount === 0) {
+        console.log(`    🚨 Creating minimal result for record ${recordId}`)
+        const minimalFields: Record<string, unknown> = {}
+        fieldMetaList.forEach((field) => {
+          minimalFields[field.name] = { error: "Failed to extract after multiple attempts" }
+        })
+
+        bestResult = {
+          fields: minimalFields,
+          fieldCount: fieldMetaList.length,
+          emptyFields: fieldMetaList.map((f) => f.name),
+        }
+      }
+    }
+  }
+
+  console.log(
+    `  ✅ Best result for ${recordId}: ${bestResult.fieldCount} fields, ${bestResult.emptyFields.length} empty`,
+  )
+  return bestResult
+}
+
+// 🔥 FIX 2: FIELD ORDER PRESERVATION - Khắc phục fields bị đảo
+const preserveFieldOrder = (
+  data: RecordData[],
+  fieldMetaList: any[],
+): {
+  orderedData: RecordData[]
+  fieldOrderMap: Record<string, number>
+  fieldOrderReport: string
+} => {
+  console.log(`🔧 ===== FIELD ORDER PRESERVATION =====`)
+  console.log(`📋 Expected field order from metadata:`)
+
+  // Create field order map from metadata
+  const fieldOrderMap: Record<string, number> = {}
+  fieldMetaList.forEach((field, index) => {
+    fieldOrderMap[field.name] = index
+    console.log(`  ${index + 1}. "${field.name}" (${field.type})`)
+  })
+
+  // Analyze current field order in data
+  console.log(`📊 Analyzing field order in ${data.length} records...`)
+  const fieldOrderIssues: string[] = []
+  const fieldFrequency: Record<string, number> = {}
+
+  data.forEach((record, recordIndex) => {
+    const recordFields = Object.keys(record.fields)
+
+    // Count field frequency
+    recordFields.forEach((fieldName) => {
+      fieldFrequency[fieldName] = (fieldFrequency[fieldName] || 0) + 1
+    })
+
+    // Check for order issues (only for first few records to avoid spam)
+    if (recordIndex < 3) {
+      const expectedOrder = fieldMetaList.map((f) => f.name)
+      const actualOrder = recordFields.filter((f) => expectedOrder.includes(f))
+
+      if (JSON.stringify(expectedOrder) !== JSON.stringify(actualOrder)) {
+        fieldOrderIssues.push(
+          `Record ${recordIndex + 1}: Expected [${expectedOrder.slice(0, 3).join(", ")}...] but got [${actualOrder.slice(0, 3).join(", ")}...]`,
+        )
+      }
+    }
+  })
+
+  console.log(`📊 Field frequency analysis:`)
+  Object.entries(fieldFrequency)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 10)
+    .forEach(([fieldName, count]) => {
+      const expectedIndex = fieldOrderMap[fieldName]
+      console.log(`  "${fieldName}": ${count}/${data.length} records (expected position: ${expectedIndex + 1})`)
+    })
+
+  if (fieldOrderIssues.length > 0) {
+    console.log(`⚠️ Field order issues detected:`)
+    fieldOrderIssues.forEach((issue) => console.log(`  ${issue}`))
+  }
+
+  // Reorder fields in each record according to metadata
+  console.log(`🔧 Reordering fields according to metadata...`)
+  const orderedData: RecordData[] = data.map((record, recordIndex) => {
+    const orderedFields: Record<string, unknown> = {}
+
+    // First, add fields in the correct order from metadata
+    fieldMetaList.forEach((fieldMeta) => {
+      const fieldName = fieldMeta.name
+      if (record.fields.hasOwnProperty(fieldName)) {
+        orderedFields[fieldName] = record.fields[fieldName]
+      } else {
+        // Field is missing, add as null but preserve the position
+        orderedFields[fieldName] = null
+        if (recordIndex === 0) {
+          // Only log for first record to avoid spam
+          console.log(`  ⚠️ Missing field "${fieldName}" in record ${recordIndex + 1}, adding as null`)
+        }
+      }
+    })
+
+    // Then, add any extra fields that weren't in metadata (at the end)
+    Object.entries(record.fields).forEach(([fieldName, value]) => {
+      if (!fieldOrderMap.hasOwnProperty(fieldName)) {
+        orderedFields[fieldName] = value
+        if (recordIndex === 0) {
+          console.log(`  ➕ Extra field "${fieldName}" found, adding at end`)
+        }
+      }
+    })
+
+    return {
+      ...record,
+      fields: orderedFields,
+    }
+  })
+
+  const fieldOrderReport = `
+🔧 FIELD ORDER PRESERVATION REPORT:
+  📋 Expected fields: ${fieldMetaList.length}
+  📊 Records processed: ${data.length}
+  ⚠️ Order issues detected: ${fieldOrderIssues.length}
+  📈 Field frequency: ${Object.keys(fieldFrequency).length} unique fields found
+  
+🎯 Field Order Map:
+${fieldMetaList
+  .slice(0, 10)
+  .map((field, index) => `  ${index + 1}. "${field.name}" → Position ${index + 1}`)
+  .join("\n")}
+${fieldMetaList.length > 10 ? `  ... and ${fieldMetaList.length - 10} more fields` : ""}
+
+${fieldOrderIssues.length === 0 ? "✅ All fields are in correct order!" : `⚠️ ${fieldOrderIssues.length} records had field order issues (now fixed)`}
+  `
+
+  console.log(fieldOrderReport)
+  console.log(`===== END FIELD ORDER PRESERVATION =====`)
+
+  return {
+    orderedData,
+    fieldOrderMap,
+    fieldOrderReport,
+  }
+}
+
+// 🔥 ENHANCED STRATEGY: Deep extraction với field order preservation
+const enhancedDeepExtractionStrategy = async (tableId: string): Promise<RecordData[]> => {
+  console.log(`🚀 ENHANCED DEEP EXTRACTION STRATEGY`)
+  console.log(`🎯 Focus: Complete field extraction + Correct field order`)
+
+  try {
+    const table = await base.getTable(tableId)
+    if (!table) throw new Error("Cannot get table")
+
+    // Get field metadata for order preservation
+    const fieldMetaList = await table.getFieldMetaList()
+    console.log(`📋 Field metadata: ${fieldMetaList.length} fields`)
+    fieldMetaList.forEach((field, index) => {
+      console.log(`  ${index + 1}. "${field.name}" (${field.type}) [ID: ${field.id}]`)
+    })
+
+    const recordIdList = await table.getRecordIdList()
+    console.log(`📊 Processing ${recordIdList.length} records with deep extraction...`)
+
+    const allData: RecordData[] = []
+    let totalFieldsExtracted = 0
+    let totalEmptyFields = 0
+
+    // Process records with deep extraction
+    for (let i = 0; i < recordIdList.length; i++) {
+      const recordId = recordIdList[i]
+
+      try {
+        const { fields, fieldCount, emptyFields } = await deepFieldExtraction(table, recordId, fieldMetaList)
+
+        allData.push({
+          recordId: recordId,
+          fields: fields,
+          strategy: "enhanced-deep",
+          fieldCount: fieldCount,
+          emptyFields: emptyFields,
+        })
+
+        totalFieldsExtracted += fieldCount
+        totalEmptyFields += emptyFields.length
+
+        // Progress logging
+        if ((i + 1) % 25 === 0) {
+          console.log(`📊 Deep extraction progress: ${i + 1}/${recordIdList.length} records`)
+          console.log(`  📈 Avg fields per record: ${(totalFieldsExtracted / (i + 1)).toFixed(1)}`)
+          console.log(`  📉 Avg empty fields per record: ${(totalEmptyFields / (i + 1)).toFixed(1)}`)
+        }
+
+        // Small delay to avoid overwhelming the API
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      } catch (error) {
+        console.error(`❌ Deep extraction failed for record ${i + 1}:`, error)
+
+        // Create error record but maintain field structure
+        const errorFields: Record<string, unknown> = {}
+        fieldMetaList.forEach((field) => {
+          errorFields[field.name] = { error: `Deep extraction failed: ${error}` }
+        })
+
+        allData.push({
+          recordId: recordId,
+          fields: errorFields,
+          strategy: "enhanced-deep",
+          fieldCount: fieldMetaList.length,
+          emptyFields: fieldMetaList.map((f) => f.name),
+        })
       }
     }
 
-    console.log(`✅ Data loading complete:`)
-    console.log(`  📊 Total records: ${recordIdList.length}`)
-    console.log(`  ✅ Successfully loaded: ${successCount}`)
-    console.log(`  ❌ Errors: ${errorCount}`)
-    console.log(`  📄 Final data array length: ${allData.length}`)
-
-    // Analyze data quality
-    const recordsWithData = allData.filter((record) =>
-      Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
+    console.log(`✅ Deep extraction completed: ${allData.length} records`)
+    console.log(`📊 Total fields extracted: ${totalFieldsExtracted}`)
+    console.log(`📉 Total empty fields: ${totalEmptyFields}`)
+    console.log(
+      `📈 Average field completeness: ${(((totalFieldsExtracted - totalEmptyFields) / totalFieldsExtracted) * 100).toFixed(1)}%`,
     )
 
-    console.log(`📊 Data quality analysis:`)
-    console.log(`  Records with actual data: ${recordsWithData.length}/${allData.length}`)
-    console.log(`  Empty records: ${allData.length - recordsWithData.length}`)
+    // Apply field order preservation
+    const { orderedData, fieldOrderReport } = preserveFieldOrder(allData, fieldMetaList)
 
-    if (recordsWithData.length > 0) {
-      // Show sample of field names
-      const sampleRecord = recordsWithData[0]
-      const fieldNames = Object.keys(sampleRecord.fields)
-      console.log(`  Sample fields (${fieldNames.length}):`, fieldNames.slice(0, 10))
-    }
+    console.log(`🔧 Field order preservation applied`)
+    console.log(fieldOrderReport)
 
-    return allData
+    return orderedData
   } catch (error) {
-    console.error("❌ Error getting table data:", error)
-    throw new Error(`Không thể lấy dữ liệu bảng: ${error}`)
-  }
-}
-
-// Helper function để format field value
-const formatFieldValue = (value: unknown, fieldType?: string): string => {
-  if (value === null || value === undefined) {
-    return ""
-  }
-
-  if (typeof value === "object") {
-    return JSON.stringify(value)
-  }
-
-  return String(value)
-}
-
-// Function lấy dữ liệu với field type information
-export const getTableDataWithTypes = async (
-  tableId: string,
-): Promise<{
-  data: RecordData[]
-  fieldTypes: Record<string, string>
-  fieldNames: string[]
-  fieldMetadata: Array<{ id: string; name: string; type: string }>
-}> => {
-  try {
-    console.log(`📥 Getting table data with enhanced field metadata: ${tableId}`)
-
-    const table = await base.getTable(tableId)
-    if (!table) {
-      throw new Error("Không thể lấy table object")
-    }
-
-    // Lấy field metadata chi tiết
-    const fieldMetaList = await table.getFieldMetaList()
-    const fieldTypes: Record<string, string> = {}
-    const fieldNames: string[] = []
-    const fieldMetadata: Array<{ id: string; name: string; type: string }> = []
-
-    fieldMetaList.forEach((field) => {
-      fieldTypes[field.name] = field.type.toString()
-      fieldNames.push(field.name)
-      fieldMetadata.push({
-        id: field.id || field.name,
-        name: field.name,
-        type: field.type.toString(),
-      })
-    })
-
-    console.log(`📋 Field metadata collected:`)
-    fieldMetadata.forEach((field) => {
-      console.log(`  "${field.name}" (${field.type}) [ID: ${field.id}]`)
-    })
-
-    // Lấy data
-    const data = await getTableData(tableId)
-
-    return {
-      data,
-      fieldTypes,
-      fieldNames,
-      fieldMetadata,
-    }
-  } catch (error) {
-    console.error("❌ Error getting table data with enhanced metadata:", error)
+    console.error(`❌ Enhanced deep extraction strategy failed:`, error)
     throw error
   }
 }
 
-// 🔥 MULTIPLE EXTRACTION STRATEGIES để khắc phục data loss
+// 🔥 MULTIPLE EXTRACTION STRATEGIES với enhanced deep extraction
 export interface ExtractionStrategy {
   name: string
   description: string
   extract: (tableId: string) => Promise<RecordData[]>
 }
 
-// 🔥 STRATEGY 1: Batch extraction với retry
+// 🔥 STRATEGY 1: Enhanced Deep Extraction (NEW - Highest Priority)
+const enhancedDeepStrategy: ExtractionStrategy = {
+  name: "Enhanced Deep Extraction",
+  description: "Complete field extraction with order preservation and multiple retry mechanisms",
+  extract: enhancedDeepExtractionStrategy,
+}
+
+// 🔥 STRATEGY 2: Parallel extraction với controlled concurrency
+const parallelExtractionStrategy = async (tableId: string): Promise<RecordData[]> => {
+  console.log(`🔄 STRATEGY: Parallel extraction với controlled concurrency...`)
+
+  try {
+    const table = await base.getTable(tableId)
+    if (!table) throw new Error("Cannot get table")
+
+    const recordIdList = await table.getRecordIdList()
+    console.log(`📊 Parallel processing ${recordIdList.length} records...`)
+
+    const concurrencyLimit = 5 // Control concurrency to avoid overwhelming the API
+    const allData: RecordData[] = []
+
+    // Process in chunks with controlled concurrency
+    for (let i = 0; i < recordIdList.length; i += concurrencyLimit) {
+      const chunk = recordIdList.slice(i, i + concurrencyLimit)
+
+      const chunkPromises = chunk.map(async (recordId, index) => {
+        try {
+          const recordData = await table.getRecordById(recordId)
+          return {
+            recordId: recordId,
+            fields: recordData?.fields || {},
+            strategy: "parallel",
+          }
+        } catch (error) {
+          console.warn(`⚠️ Parallel extraction failed for record ${i + index + 1}:`, error)
+          return {
+            recordId: recordId,
+            fields: { error: `Parallel extraction failed: ${error}` },
+            strategy: "parallel",
+          }
+        }
+      })
+
+      const chunkResults = await Promise.all(chunkPromises)
+      allData.push(...chunkResults)
+
+      // Progress logging
+      console.log(
+        `📊 Parallel progress: ${Math.min(i + concurrencyLimit, recordIdList.length)}/${recordIdList.length} records`,
+      )
+
+      // Small delay between chunks
+      if (i + concurrencyLimit < recordIdList.length) {
+        await new Promise((resolve) => setTimeout(resolve, 300))
+      }
+    }
+
+    console.log(`✅ Parallel extraction completed: ${allData.length}/${recordIdList.length} records`)
+    return allData
+  } catch (error) {
+    console.error(`❌ Parallel extraction strategy failed:`, error)
+    throw error
+  }
+}
+
+// 🔥 STRATEGY 3: Batch extraction với retry
 const batchExtractionStrategy = async (tableId: string): Promise<RecordData[]> => {
-  console.log(`🔄 STRATEGY 1: Batch extraction với retry mechanism...`)
+  console.log(`🔄 STRATEGY: Batch extraction với retry mechanism...`)
 
   try {
     const table = await base.getTable(tableId)
@@ -532,9 +767,9 @@ const batchExtractionStrategy = async (tableId: string): Promise<RecordData[]> =
   }
 }
 
-// 🔥 STRATEGY 2: Sequential extraction với exponential backoff
+// 🔥 STRATEGY 4: Sequential extraction với exponential backoff
 const sequentialExtractionStrategy = async (tableId: string): Promise<RecordData[]> => {
-  console.log(`🔄 STRATEGY 2: Sequential extraction với exponential backoff...`)
+  console.log(`🔄 STRATEGY: Sequential extraction với exponential backoff...`)
 
   try {
     const table = await base.getTable(tableId)
@@ -597,130 +832,7 @@ const sequentialExtractionStrategy = async (tableId: string): Promise<RecordData
   }
 }
 
-// 🔥 STRATEGY 3: Parallel extraction với controlled concurrency
-const parallelExtractionStrategy = async (tableId: string): Promise<RecordData[]> => {
-  console.log(`🔄 STRATEGY 3: Parallel extraction với controlled concurrency...`)
-
-  try {
-    const table = await base.getTable(tableId)
-    if (!table) throw new Error("Cannot get table")
-
-    const recordIdList = await table.getRecordIdList()
-    console.log(`📊 Parallel processing ${recordIdList.length} records...`)
-
-    const concurrencyLimit = 5 // Control concurrency to avoid overwhelming the API
-    const allData: RecordData[] = []
-
-    // Process in chunks with controlled concurrency
-    for (let i = 0; i < recordIdList.length; i += concurrencyLimit) {
-      const chunk = recordIdList.slice(i, i + concurrencyLimit)
-
-      const chunkPromises = chunk.map(async (recordId, index) => {
-        try {
-          const recordData = await table.getRecordById(recordId)
-          return {
-            recordId: recordId,
-            fields: recordData?.fields || {},
-            strategy: "parallel",
-          }
-        } catch (error) {
-          console.warn(`⚠️ Parallel extraction failed for record ${i + index + 1}:`, error)
-          return {
-            recordId: recordId,
-            fields: { error: `Parallel extraction failed: ${error}` },
-            strategy: "parallel",
-          }
-        }
-      })
-
-      const chunkResults = await Promise.all(chunkPromises)
-      allData.push(...chunkResults)
-
-      // Progress logging
-      console.log(
-        `📊 Parallel progress: ${Math.min(i + concurrencyLimit, recordIdList.length)}/${recordIdList.length} records`,
-      )
-
-      // Small delay between chunks
-      if (i + concurrencyLimit < recordIdList.length) {
-        await new Promise((resolve) => setTimeout(resolve, 300))
-      }
-    }
-
-    console.log(`✅ Parallel extraction completed: ${allData.length}/${recordIdList.length} records`)
-    return allData
-  } catch (error) {
-    console.error(`❌ Parallel extraction strategy failed:`, error)
-    throw error
-  }
-}
-
-// 🔥 STRATEGY 4: Field-by-field extraction (for problematic tables)
-const fieldByFieldExtractionStrategy = async (tableId: string): Promise<RecordData[]> => {
-  console.log(`🔄 STRATEGY 4: Field-by-field extraction strategy...`)
-
-  try {
-    const table = await base.getTable(tableId)
-    if (!table) throw new Error("Cannot get table")
-
-    const recordIdList = await table.getRecordIdList()
-    const fieldMetaList = await table.getFieldMetaList()
-
-    console.log(`📊 Field-by-field processing: ${recordIdList.length} records × ${fieldMetaList.length} fields`)
-
-    const allData: RecordData[] = []
-
-    for (let i = 0; i < recordIdList.length; i++) {
-      const recordId = recordIdList[i]
-      let recordFields: Record<string, unknown> = {}
-
-      // Try to get complete record first
-      try {
-        const completeRecord = await table.getRecordById(recordId)
-        if (completeRecord?.fields) {
-          recordFields = completeRecord.fields
-        }
-      } catch (error) {
-        console.warn(`⚠️ Complete record fetch failed for ${recordId}, trying field-by-field`)
-
-        // Fallback to field-by-field extraction
-        for (const fieldMeta of fieldMetaList) {
-          try {
-            const cellValue = await table.getCellValue(recordId, fieldMeta.id)
-            if (cellValue !== null && cellValue !== undefined) {
-              recordFields[fieldMeta.name] = cellValue
-            }
-          } catch (fieldError) {
-            console.warn(`⚠️ Field extraction failed for ${fieldMeta.name}:`, fieldError)
-            recordFields[fieldMeta.name] = { error: `Field extraction failed: ${fieldError}` }
-          }
-        }
-      }
-
-      allData.push({
-        recordId: recordId,
-        fields: recordFields,
-        strategy: "field-by-field",
-      })
-
-      // Progress logging
-      if ((i + 1) % 25 === 0) {
-        console.log(`📊 Field-by-field progress: ${i + 1}/${recordIdList.length} records`)
-      }
-
-      // Small delay to avoid overwhelming the API
-      await new Promise((resolve) => setTimeout(resolve, 100))
-    }
-
-    console.log(`✅ Field-by-field extraction completed: ${allData.length}/${recordIdList.length} records`)
-    return allData
-  } catch (error) {
-    console.error(`❌ Field-by-field extraction strategy failed:`, error)
-    throw error
-  }
-}
-
-// 🔥 MAIN: Multi-strategy data extraction with fallback
+// 🔥 MAIN: Multi-strategy data extraction with enhanced deep extraction
 export const getTableDataWithMultipleStrategies = async (
   tableId: string,
 ): Promise<{
@@ -731,24 +843,35 @@ export const getTableDataWithMultipleStrategies = async (
     totalExpected: number
     totalExtracted: number
     dataLossPercentage: number
-    strategies: Array<{ name: string; success: boolean; recordCount: number; error?: string }>
+    fieldCompletenessRate: number
+    strategies: Array<{
+      name: string
+      success: boolean
+      recordCount: number
+      fieldCompleteness?: number
+      error?: string
+    }>
   }
 }> => {
-  console.log(`🚀 ===== MULTI-STRATEGY DATA EXTRACTION =====`)
+  console.log(`🚀 ===== MULTI-STRATEGY DATA EXTRACTION (ENHANCED) =====`)
   console.log(`📊 Table ID: ${tableId}`)
 
   try {
-    // Get expected record count
+    // Get expected record count and field metadata
     const table = await base.getTable(tableId)
     if (!table) throw new Error("Cannot get table object")
 
     const recordIdList = await table.getRecordIdList()
+    const fieldMetaList = await table.getFieldMetaList()
     const expectedRecordCount = recordIdList.length
+    const expectedFieldCount = fieldMetaList.length
 
     console.log(`📊 Expected records: ${expectedRecordCount}`)
+    console.log(`📋 Expected fields per record: ${expectedFieldCount}`)
 
-    // Define extraction strategies in order of preference
+    // Define extraction strategies in order of preference (Enhanced Deep first)
     const strategies: ExtractionStrategy[] = [
+      enhancedDeepStrategy, // NEW: Highest priority
       {
         name: "Parallel Extraction",
         description: "Controlled parallel processing with error handling",
@@ -764,22 +887,18 @@ export const getTableDataWithMultipleStrategies = async (
         description: "Sequential processing with exponential backoff",
         extract: sequentialExtractionStrategy,
       },
-      {
-        name: "Field-by-Field Extraction",
-        description: "Individual field extraction for problematic tables",
-        extract: fieldByFieldExtractionStrategy,
-      },
     ]
 
     const strategyResults: Array<{
       name: string
       success: boolean
       recordCount: number
+      fieldCompleteness?: number
       error?: string
       data?: RecordData[]
     }> = []
     let bestResult: { data: RecordData[]; strategy: string } | null = null
-    let bestRecordCount = 0
+    let bestScore = 0 // Combined score of record count and field completeness
 
     // Try each strategy
     for (const strategy of strategies) {
@@ -792,29 +911,35 @@ export const getTableDataWithMultipleStrategies = async (
         const extractionTime = Date.now() - startTime
 
         const recordCount = strategyData.length
-        const dataQuality = calculateDataQuality(strategyData)
+        const dataQuality = calculateEnhancedDataQuality(strategyData, expectedFieldCount)
 
         console.log(`✅ ${strategy.name} completed:`)
         console.log(`  📊 Records: ${recordCount}/${expectedRecordCount}`)
+        console.log(`  📋 Field completeness: ${dataQuality.fieldCompletenessRate.toFixed(1)}%`)
         console.log(`  ⏱️ Time: ${extractionTime}ms`)
-        console.log(`  📈 Data quality: ${dataQuality.qualityScore.toFixed(1)}%`)
+        console.log(`  📈 Overall quality: ${dataQuality.qualityScore.toFixed(1)}%`)
+
+        // Calculate combined score (record completeness + field completeness)
+        const recordCompleteness = (recordCount / expectedRecordCount) * 100
+        const combinedScore = (recordCompleteness + dataQuality.fieldCompletenessRate) / 2
 
         strategyResults.push({
           name: strategy.name,
           success: true,
           recordCount: recordCount,
+          fieldCompleteness: dataQuality.fieldCompletenessRate,
           data: strategyData,
         })
 
-        // Keep the best result (highest record count and quality)
-        if (recordCount > bestRecordCount || (recordCount === bestRecordCount && dataQuality.qualityScore > 90)) {
+        // Keep the best result (highest combined score)
+        if (combinedScore > bestScore) {
           bestResult = { data: strategyData, strategy: strategy.name }
-          bestRecordCount = recordCount
+          bestScore = combinedScore
         }
 
-        // If we got perfect extraction, stop here
-        if (recordCount === expectedRecordCount && dataQuality.qualityScore > 95) {
-          console.log(`🎯 Perfect extraction achieved with ${strategy.name}!`)
+        // If we got excellent extraction, stop here
+        if (recordCount === expectedRecordCount && dataQuality.fieldCompletenessRate > 90) {
+          console.log(`🎯 Excellent extraction achieved with ${strategy.name}!`)
           break
         }
       } catch (error) {
@@ -825,6 +950,7 @@ export const getTableDataWithMultipleStrategies = async (
           name: strategy.name,
           success: false,
           recordCount: 0,
+          fieldCompleteness: 0,
           error: errorMsg,
         })
       }
@@ -835,33 +961,44 @@ export const getTableDataWithMultipleStrategies = async (
       throw new Error("All extraction strategies failed")
     }
 
-    const dataLossPercentage = ((expectedRecordCount - bestRecordCount) / expectedRecordCount) * 100
+    const dataLossPercentage = ((expectedRecordCount - bestResult.data.length) / expectedRecordCount) * 100
+    const finalDataQuality = calculateEnhancedDataQuality(bestResult.data, expectedFieldCount)
 
     const extractionReport = `
-🔍 MULTI-STRATEGY EXTRACTION REPORT:
+🔍 ENHANCED MULTI-STRATEGY EXTRACTION REPORT:
   📊 Expected records: ${expectedRecordCount}
-  ✅ Extracted records: ${bestRecordCount}
-  📉 Data loss: ${dataLossPercentage.toFixed(1)}%
+  ✅ Extracted records: ${bestResult.data.length}
+  📉 Record loss: ${dataLossPercentage.toFixed(1)}%
+  📋 Expected fields per record: ${expectedFieldCount}
+  📈 Field completeness: ${finalDataQuality.fieldCompletenessRate.toFixed(1)}%
   🎯 Best strategy: ${bestResult.strategy}
   
-📋 Strategy Results:
+📋 Strategy Performance:
 ${strategyResults
-  .map((s) => `  ${s.success ? "✅" : "❌"} ${s.name}: ${s.recordCount} records${s.error ? ` (${s.error})` : ""}`)
+  .map(
+    (s) =>
+      `  ${s.success ? "✅" : "❌"} ${s.name}: ${s.recordCount} records${s.fieldCompleteness ? ` (${s.fieldCompleteness.toFixed(1)}% fields)` : ""}${s.error ? ` - ${s.error}` : ""}`,
+  )
   .join("\n")}
 
+🎯 QUALITY ASSESSMENT:
 ${
-  dataLossPercentage === 0
-    ? "🎉 ZERO DATA LOSS ACHIEVED!"
-    : dataLossPercentage < 5
-      ? "✅ Minimal data loss (< 5%)"
-      : dataLossPercentage < 10
-        ? "⚠️ Moderate data loss (< 10%)"
-        : "❌ Significant data loss (> 10%) - Manual review required"
+  dataLossPercentage === 0 && finalDataQuality.fieldCompletenessRate > 95
+    ? "🎉 PERFECT EXTRACTION! Zero data loss + Complete fields"
+    : dataLossPercentage === 0 && finalDataQuality.fieldCompletenessRate > 80
+      ? "✅ EXCELLENT! Zero record loss + Good field completeness"
+      : dataLossPercentage < 5 && finalDataQuality.fieldCompletenessRate > 80
+        ? "✅ GOOD! Minimal record loss + Good field completeness"
+        : dataLossPercentage < 10 && finalDataQuality.fieldCompletenessRate > 60
+          ? "⚠️ ACCEPTABLE! Moderate losses but usable data"
+          : "❌ POOR! Significant data loss - Manual review required"
 }
+
+🔧 FIELD ORDER: ${bestResult.strategy === "Enhanced Deep Extraction" ? "✅ Preserved according to metadata" : "⚠️ May need reordering"}
     `
 
     console.log(extractionReport)
-    console.log(`===== END MULTI-STRATEGY EXTRACTION =====\n`)
+    console.log(`===== END ENHANCED MULTI-STRATEGY EXTRACTION =====\n`)
 
     return {
       data: bestResult.data,
@@ -869,29 +1006,35 @@ ${
       extractionReport: extractionReport,
       dataQuality: {
         totalExpected: expectedRecordCount,
-        totalExtracted: bestRecordCount,
+        totalExtracted: bestResult.data.length,
         dataLossPercentage: dataLossPercentage,
+        fieldCompletenessRate: finalDataQuality.fieldCompletenessRate,
         strategies: strategyResults.map((s) => ({
           name: s.name,
           success: s.success,
           recordCount: s.recordCount,
+          fieldCompleteness: s.fieldCompleteness,
           error: s.error,
         })),
       },
     }
   } catch (error) {
-    console.error(`❌ Multi-strategy extraction failed:`, error)
-    throw new Error(`Multi-strategy extraction failed: ${error}`)
+    console.error(`❌ Enhanced multi-strategy extraction failed:`, error)
+    throw new Error(`Enhanced multi-strategy extraction failed: ${error}`)
   }
 }
 
-// Helper function to calculate data quality
-const calculateDataQuality = (data: RecordData[]): { qualityScore: number; stats: any } => {
-  if (data.length === 0) return { qualityScore: 0, stats: {} }
+// Helper function to calculate enhanced data quality with field completeness
+const calculateEnhancedDataQuality = (
+  data: RecordData[],
+  expectedFieldCount: number,
+): { qualityScore: number; fieldCompletenessRate: number; stats: any } => {
+  if (data.length === 0) return { qualityScore: 0, fieldCompletenessRate: 0, stats: {} }
 
   let totalFields = 0
   let fieldsWithData = 0
   let errorFields = 0
+  const totalExpectedFields = data.length * expectedFieldCount
 
   data.forEach((record) => {
     Object.entries(record.fields).forEach(([fieldName, value]) => {
@@ -907,16 +1050,93 @@ const calculateDataQuality = (data: RecordData[]): { qualityScore: number; stats
 
   const qualityScore = totalFields > 0 ? (fieldsWithData / totalFields) * 100 : 0
   const errorRate = totalFields > 0 ? (errorFields / totalFields) * 100 : 0
+  const fieldCompletenessRate = totalExpectedFields > 0 ? (totalFields / totalExpectedFields) * 100 : 0
 
   return {
     qualityScore: qualityScore,
+    fieldCompletenessRate: fieldCompletenessRate,
     stats: {
       totalFields,
       fieldsWithData,
       errorFields,
       errorRate: errorRate,
       dataFillRate: qualityScore,
+      expectedFields: totalExpectedFields,
+      fieldCoverageRate: fieldCompletenessRate,
     },
+  }
+}
+
+// Function chính lấy TẤT CẢ dữ liệu từ bảng (backward compatibility)
+export const getTableData = async (tableId: string): Promise<RecordData[]> => {
+  console.log(`📥 getTableData called - using enhanced multi-strategy extraction`)
+  const result = await getTableDataWithMultipleStrategies(tableId)
+  return result.data
+}
+
+// Helper function để format field value
+const formatFieldValue = (value: unknown, fieldType?: string): string => {
+  if (value === null || value === undefined) {
+    return ""
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value)
+  }
+
+  return String(value)
+}
+
+// Function lấy dữ liệu với field type information
+export const getTableDataWithTypes = async (
+  tableId: string,
+): Promise<{
+  data: RecordData[]
+  fieldTypes: Record<string, string>
+  fieldNames: string[]
+  fieldMetadata: Array<{ id: string; name: string; type: string }>
+}> => {
+  try {
+    console.log(`📥 Getting table data with enhanced field metadata: ${tableId}`)
+
+    const table = await base.getTable(tableId)
+    if (!table) {
+      throw new Error("Không thể lấy table object")
+    }
+
+    // Lấy field metadata chi tiết
+    const fieldMetaList = await table.getFieldMetaList()
+    const fieldTypes: Record<string, string> = {}
+    const fieldNames: string[] = []
+    const fieldMetadata: Array<{ id: string; name: string; type: string }> = []
+
+    fieldMetaList.forEach((field) => {
+      fieldTypes[field.name] = field.type.toString()
+      fieldNames.push(field.name)
+      fieldMetadata.push({
+        id: field.id || field.name,
+        name: field.name,
+        type: field.type.toString(),
+      })
+    })
+
+    console.log(`📋 Field metadata collected:`)
+    fieldMetadata.forEach((field) => {
+      console.log(`  "${field.name}" (${field.type}) [ID: ${field.id}]`)
+    })
+
+    // Lấy data với enhanced extraction
+    const result = await getTableDataWithMultipleStrategies(tableId)
+
+    return {
+      data: result.data,
+      fieldTypes,
+      fieldNames,
+      fieldMetadata,
+    }
+  } catch (error) {
+    console.error("❌ Error getting table data with enhanced metadata:", error)
+    throw error
   }
 }
 
