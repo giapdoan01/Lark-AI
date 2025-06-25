@@ -100,13 +100,13 @@ const extractPlainTextFromField = (value: unknown): string => {
   return String(value)
 }
 
-// 🔥 UPDATED: CSV Conversion với plain text extraction
+// 🔥 UPDATED: CSV Conversion với consistent format
 const convertToCSV = (data: Array<{ recordId: string; fields: Record<string, unknown> }>): string => {
   if (data.length === 0) return ""
 
-  console.log(`📊 Converting ${data.length} records to clean CSV format...`)
+  console.log(`📊 Converting ${data.length} records to consistent CSV format...`)
 
-  // Get all unique field names từ tất cả records
+  // 🔥 NEW: Get ALL unique field names từ TẤT CẢ records để đảm bảo consistent structure
   const allFieldNames = new Set<string>()
   data.forEach((record) => {
     Object.keys(record.fields).forEach((fieldName) => {
@@ -117,53 +117,172 @@ const convertToCSV = (data: Array<{ recordId: string; fields: Record<string, unk
   const fieldNames = Array.from(allFieldNames).sort()
   console.log(`📋 Found ${fieldNames.length} unique fields:`, fieldNames.slice(0, 5))
 
-  // 🔥 NEW: Create simple headers (STT thay vì recordId)
+  // 🔥 NEW: Create consistent headers
   const headers = ["STT", ...fieldNames]
   const csvHeaders = headers.join(",")
 
-  // 🔥 UPDATED: Convert records to clean CSV rows
+  // 🔥 UPDATED: Convert records với consistent column structure
   const csvRows = data.map((record, index) => {
     const values = [
-      String(index + 1), // STT thay vì recordId dài
+      String(index + 1), // STT
+      // 🔥 IMPORTANT: Đảm bảo TẤT CẢ fields đều có value (empty nếu không có)
       ...fieldNames.map((fieldName) => {
         const rawValue = record.fields[fieldName]
         const cleanValue = extractPlainTextFromField(rawValue)
+
+        // 🔥 NEW: Handle empty values consistently
+        if (!cleanValue || cleanValue.trim() === "") {
+          return "" // Empty cell
+        }
 
         // Escape commas and quotes for CSV
         if (cleanValue.includes(",") || cleanValue.includes('"') || cleanValue.includes("\n")) {
           return `"${cleanValue.replace(/"/g, '""')}"`
         }
 
-        return cleanValue || ""
+        return cleanValue
       }),
     ]
 
+    // 🔥 IMPORTANT: Join với comma, empty values sẽ tạo ra ,,
     return values.join(",")
   })
 
   const csvContent = [csvHeaders, ...csvRows].join("\n")
 
-  // 🔥 NEW: Calculate compression stats
+  // 🔥 NEW: Validate consistent structure
+  const lines = csvContent.split("\n")
+  const headerColumnCount = lines[0].split(",").length
+  let inconsistentRows = 0
+
+  lines.slice(1).forEach((line, index) => {
+    const columnCount = line.split(",").length
+    if (columnCount !== headerColumnCount) {
+      inconsistentRows++
+      console.warn(`⚠️ Row ${index + 1} has ${columnCount} columns, expected ${headerColumnCount}`)
+    }
+  })
+
+  // Calculate compression stats
   const originalJsonSize = JSON.stringify(data).length
   const csvSize = csvContent.length
   const compressionRatio = Math.round((1 - csvSize / originalJsonSize) * 100)
 
-  console.log(`✅ Clean CSV Conversion Complete:`)
+  console.log(`✅ Consistent CSV Conversion Complete:`)
   console.log(`  📊 Records: ${data.length}`)
   console.log(`  📋 Fields: ${fieldNames.length}`)
+  console.log(`  📄 Total columns: ${headerColumnCount} (STT + ${fieldNames.length} fields)`)
   console.log(`  📄 Original JSON: ${originalJsonSize} chars`)
-  console.log(`  📄 Clean CSV: ${csvSize} chars`)
+  console.log(`  📄 Consistent CSV: ${csvSize} chars`)
   console.log(`  🎯 Compression: ${compressionRatio}% smaller`)
   console.log(`  🎯 Estimated tokens: ${estimateTokens(csvContent)}`)
+  console.log(`  ✅ Inconsistent rows: ${inconsistentRows}/${data.length}`)
 
-  // Show sample of clean data
+  // Show sample of consistent data
   const sampleRows = csvContent.split("\n").slice(0, 3)
-  console.log(`📋 Sample clean CSV:`)
+  console.log(`📋 Sample consistent CSV:`)
   sampleRows.forEach((row, i) => {
-    console.log(`  ${i === 0 ? "Header" : `Row ${i}`}: ${row.substring(0, 100)}${row.length > 100 ? "..." : ""}`)
+    const cols = row.split(",")
+    console.log(`  ${i === 0 ? "Header" : `Row ${i}`}: ${cols.length} columns`)
+    console.log(`    ${row.substring(0, 100)}${row.length > 100 ? "..." : ""}`)
   })
 
   return csvContent
+}
+
+// 🔥 NEW: Smart chunking by character count, không cắt giữa record
+const createSmartCSVChunks = (csvContent: string): { csvChunks: string[]; chunkStats: any[] } => {
+  console.log(`📊 ===== SMART CSV CHUNKING =====`)
+
+  const lines = csvContent.split("\n")
+  const headerLine = lines[0]
+  const dataLines = lines.slice(1)
+
+  console.log(`📋 Total: ${lines.length} lines (1 header + ${dataLines.length} data rows)`)
+  console.log(`📄 Total CSV size: ${csvContent.length} characters`)
+
+  // 🔥 Calculate target chunk size
+  const processingAPIs = API_KEYS.length - 1 // Trừ 1 API cho analysis
+  const targetChunkSize = Math.floor(csvContent.length / processingAPIs)
+
+  console.log(`🔧 Processing APIs: ${processingAPIs} (${API_KEYS.length} total - 1 for analysis)`)
+  console.log(`🎯 Target chunk size: ${targetChunkSize} characters each`)
+
+  const csvChunks: string[] = []
+  const chunkStats: any[] = []
+
+  let currentChunk = headerLine + "\n" // Bắt đầu với header
+  let currentChunkSize = headerLine.length + 1
+  let currentRowCount = 0
+
+  for (let i = 0; i < dataLines.length; i++) {
+    const dataLine = dataLines[i]
+    const lineSize = dataLine.length + 1 // +1 for \n
+
+    // 🔥 Check if adding this line would exceed target size
+    if (currentChunkSize + lineSize > targetChunkSize && currentRowCount > 0) {
+      // 🔥 Finish current chunk (không cắt giữa record)
+      csvChunks.push(currentChunk.trim())
+      chunkStats.push({
+        chunkIndex: csvChunks.length,
+        rows: currentRowCount,
+        characters: currentChunkSize,
+        targetSize: targetChunkSize,
+        efficiency: Math.round((currentChunkSize / targetChunkSize) * 100),
+      })
+
+      console.log(
+        `📦 Chunk ${csvChunks.length}: ${currentRowCount} rows, ${currentChunkSize} chars (${Math.round((currentChunkSize / targetChunkSize) * 100)}% of target)`,
+      )
+
+      // 🔥 Start new chunk with header
+      currentChunk = headerLine + "\n" + dataLine + "\n"
+      currentChunkSize = headerLine.length + 1 + lineSize
+      currentRowCount = 1
+    } else {
+      // 🔥 Add line to current chunk
+      currentChunk += dataLine + "\n"
+      currentChunkSize += lineSize
+      currentRowCount++
+    }
+  }
+
+  // 🔥 Add final chunk if has data
+  if (currentRowCount > 0) {
+    csvChunks.push(currentChunk.trim())
+    chunkStats.push({
+      chunkIndex: csvChunks.length,
+      rows: currentRowCount,
+      characters: currentChunkSize,
+      targetSize: targetChunkSize,
+      efficiency: Math.round((currentChunkSize / targetChunkSize) * 100),
+    })
+
+    console.log(
+      `📦 Final Chunk ${csvChunks.length}: ${currentRowCount} rows, ${currentChunkSize} chars (${Math.round((currentChunkSize / targetChunkSize) * 100)}% of target)`,
+    )
+  }
+
+  // 🔥 Summary
+  const totalChunks = csvChunks.length
+  const totalProcessedChars = chunkStats.reduce((sum, stat) => sum + stat.characters, 0)
+  const avgEfficiency = Math.round(chunkStats.reduce((sum, stat) => sum + stat.efficiency, 0) / totalChunks)
+
+  console.log(`📊 Smart Chunking Summary:`)
+  console.log(`  🎯 Target: ${processingAPIs} chunks of ~${targetChunkSize} chars each`)
+  console.log(`  ✅ Created: ${totalChunks} chunks`)
+  console.log(`  📄 Total processed: ${totalProcessedChars}/${csvContent.length} chars`)
+  console.log(`  📈 Average efficiency: ${avgEfficiency}% of target size`)
+  console.log(`  🔧 Remaining API for analysis: 1`)
+
+  // Show chunk details
+  chunkStats.forEach((stat) => {
+    console.log(`    Chunk ${stat.chunkIndex}: ${stat.rows} rows, ${stat.characters} chars (${stat.efficiency}%)`)
+  })
+
+  console.log(`===============================================`)
+
+  return { csvChunks, chunkStats }
 }
 
 // 🔥 SIMPLIFIED: CSV Validation
@@ -196,36 +315,6 @@ const validateCSV = (csvContent: string): { isValid: boolean; rowCount: number; 
       error: `CSV validation error: ${error}`,
     }
   }
-}
-
-// 🔥 SIMPLIFIED: Chia CSV thành chunks đơn giản
-const createCSVChunks = (data: any[]): { chunks: any[][]; csvChunks: string[] } => {
-  console.log(`📊 ===== CSV CHUNKING với ${data.length} records =====`)
-
-  // Chia data thành 4 chunks đều nhau
-  const recordsPerChunk = Math.ceil(data.length / 4)
-  const chunks: any[][] = []
-  const csvChunks: string[] = []
-
-  for (let i = 0; i < 4; i++) {
-    const startIndex = i * recordsPerChunk
-    const endIndex = Math.min(startIndex + recordsPerChunk, data.length)
-    const chunk = data.slice(startIndex, endIndex)
-
-    if (chunk.length > 0) {
-      const chunkCSV = convertToCSV(chunk)
-      const chunkTokens = estimateTokens(chunkCSV)
-
-      console.log(`📊 Chunk ${i + 1}: ${chunk.length} records, ${chunkTokens} tokens`)
-      chunks.push(chunk)
-      csvChunks.push(chunkCSV)
-    }
-  }
-
-  console.log(`📊 Total chunks created: ${chunks.length}`)
-  console.log(`===============================================`)
-
-  return { chunks, csvChunks }
 }
 
 // 🔥 UPDATED: Test single API key với llama3-70b-8192
@@ -314,11 +403,11 @@ const processSingleCSVChunk = async (
     const groq = createGroqClient(apiKey)
 
     // 🔥 UPDATED: Simple prompt cho clean CSV
-    const optimizePrompt = `Clean this CSV data, remove empty rows, keep only meaningful data:
+    const optimizePrompt = `Clean this CSV data, remove empty rows, keep consistent column structure:
 
 ${csvChunk}
 
-Return clean CSV with same structure:`
+Return clean CSV with same column structure:`
 
     const promptTokens = estimateTokens(optimizePrompt)
     console.log(`📤 Sending request: ${promptTokens} input tokens`)
@@ -388,65 +477,75 @@ Return clean CSV with same structure:`
   }
 }
 
-// 🔥 UPDATED: Main pipeline với better error handling
+// 🔥 UPDATED: Main pipeline với smart chunking
 export const preprocessDataWithPipeline = async (
   data: any[],
   tableName: string,
 ): Promise<{ success: boolean; optimizedData: string; analysis: string; keyUsage: any }> => {
   try {
-    console.log(`🚀 Clean CSV Pipeline với ${data.length} records - Model: ${SINGLE_MODEL}`)
+    console.log(`🚀 Smart CSV Pipeline với ${data.length} records - Model: ${SINGLE_MODEL}`)
 
-    if (!API_KEYS || API_KEYS.length < 5) {
-      throw new Error("Cần ít nhất 5 API keys")
+    if (!API_KEYS || API_KEYS.length < 2) {
+      throw new Error("Cần ít nhất 2 API keys (1 cho processing, 1 cho analysis)")
     }
 
-    // 🔥 BƯỚC 1: Chia CSV thành chunks
-    console.log(`📊 BƯỚC 1: Chia CSV thành clean chunks...`)
-    const { chunks, csvChunks } = createCSVChunks(data)
+    // 🔥 BƯỚC 1: Convert to consistent CSV
+    console.log(`📊 BƯỚC 1: Convert to consistent CSV format...`)
+    const fullCSV = convertToCSV(data)
+
+    if (!fullCSV) {
+      throw new Error("Không thể tạo CSV content")
+    }
+
+    // 🔥 BƯỚC 2: Smart chunking by character count
+    console.log(`📊 BƯỚC 2: Smart chunking by character count...`)
+    const { csvChunks, chunkStats } = createSmartCSVChunks(fullCSV)
 
     if (csvChunks.length === 0) {
       throw new Error("Không thể tạo CSV chunks")
     }
 
-    // Show sample of clean CSV
-    console.log(`📋 Sample clean CSV chunk:`)
+    // Show sample of consistent CSV
+    console.log(`📋 Sample consistent CSV:`)
     const sampleLines = csvChunks[0].split("\n").slice(0, 3)
     sampleLines.forEach((line, i) => {
-      console.log(`  ${i === 0 ? "Header" : `Row ${i}`}: ${line}`)
+      const cols = line.split(",")
+      console.log(`  ${i === 0 ? "Header" : `Row ${i}`}: ${cols.length} columns`)
+      console.log(`    ${line.substring(0, 80)}${line.length > 80 ? "..." : ""}`)
     })
 
-    // 🔥 BƯỚC 2: Test API keys với detailed logging
-    console.log(`🧪 BƯỚC 2: Test ${Math.min(4, csvChunks.length)} API keys...`)
-    const keyTests = []
+    // 🔥 BƯỚC 3: Test processing APIs (không test analysis API)
+    const processingAPICount = Math.min(csvChunks.length, API_KEYS.length - 1)
+    console.log(`🧪 BƯỚC 3: Test ${processingAPICount} processing APIs...`)
 
-    for (let i = 0; i < Math.min(4, csvChunks.length); i++) {
-      console.log(`🧪 Testing API ${i + 1}...`)
+    const keyTests = []
+    for (let i = 0; i < processingAPICount; i++) {
+      console.log(`🧪 Testing processing API ${i + 1}...`)
       const testResult = await testSingleAPI(i)
       keyTests.push(testResult)
 
       if (testResult) {
-        console.log(`✅ API ${i + 1} working`)
+        console.log(`✅ Processing API ${i + 1} working`)
       } else {
-        console.log(`❌ API ${i + 1} failed`)
+        console.log(`❌ Processing API ${i + 1} failed`)
       }
     }
 
     const workingKeys = keyTests.filter(Boolean).length
-    console.log(`🔑 ${workingKeys}/${Math.min(4, csvChunks.length)} APIs hoạt động`)
+    console.log(`🔑 ${workingKeys}/${processingAPICount} processing APIs hoạt động`)
 
     if (workingKeys === 0) {
-      console.log(`⚠️ No working APIs, using clean raw CSV`)
-      const rawCSV = convertToCSV(data)
+      console.log(`⚠️ No working processing APIs, using raw consistent CSV`)
       return {
         success: true,
-        optimizedData: rawCSV,
-        analysis: `⚠️ Không có API keys hoạt động với ${SINGLE_MODEL}, sử dụng clean CSV với ${data.length} records.`,
-        keyUsage: { error: true, format: "Clean CSV", fallback: true, model: SINGLE_MODEL },
+        optimizedData: fullCSV,
+        analysis: `⚠️ Không có processing APIs hoạt động với ${SINGLE_MODEL}, sử dụng consistent CSV với ${data.length} records.`,
+        keyUsage: { error: true, format: "Consistent CSV", fallback: true, model: SINGLE_MODEL },
       }
     }
 
-    // 🔥 BƯỚC 3: Process từng chunk với better error handling
-    console.log(`⏳ BƯỚC 3: Process ${csvChunks.length} clean CSV chunks...`)
+    // 🔥 BƯỚC 4: Process chunks với working APIs
+    console.log(`⏳ BƯỚC 4: Process ${csvChunks.length} CSV chunks với ${workingKeys} working APIs...`)
 
     const processResults = []
 
@@ -455,7 +554,8 @@ export const preprocessDataWithPipeline = async (
       const csvChunk = csvChunks[i]
       const keyIndex = i % workingKeys // Cycle through working keys
 
-      console.log(`🔧 Processing clean CSV chunk ${i + 1} với API ${keyIndex + 1}`)
+      console.log(`🔧 Processing chunk ${i + 1}/${csvChunks.length} với API ${keyIndex + 1}`)
+      console.log(`📊 Chunk stats: ${chunkStats[i].rows} rows, ${chunkStats[i].characters} chars`)
 
       // CHỈ 1 REQUEST DUY NHẤT
       const result = await processSingleCSVChunk(API_KEYS[keyIndex], keyIndex, csvChunk, i, csvChunks.length)
@@ -464,7 +564,7 @@ export const preprocessDataWithPipeline = async (
 
       // Delay nhỏ giữa các chunks
       if (i < csvChunks.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1000)) // Tăng delay lên 1s
+        await new Promise((resolve) => setTimeout(resolve, 1000))
       }
     }
 
@@ -474,24 +574,23 @@ export const preprocessDataWithPipeline = async (
 
     // 🔥 IMPROVED: Chỉ fail nếu không có chunk nào thành công
     if (successfulResults.length === 0) {
-      console.log(`❌ All chunks failed, using clean raw CSV`)
-      const rawCSV = convertToCSV(data)
+      console.log(`❌ All chunks failed, using consistent raw CSV`)
       return {
         success: true,
-        optimizedData: rawCSV,
-        analysis: `⚠️ Tất cả chunks thất bại với ${SINGLE_MODEL}, sử dụng clean CSV với ${data.length} records.`,
+        optimizedData: fullCSV,
+        analysis: `⚠️ Tất cả chunks thất bại với ${SINGLE_MODEL}, sử dụng consistent CSV với ${data.length} records.`,
         keyUsage: {
           totalKeys: API_KEYS.length,
           processedChunks: 0,
           fallback: true,
-          format: "Clean CSV",
+          format: "Consistent CSV",
           model: SINGLE_MODEL,
         },
       }
     }
 
-    // 🔥 BƯỚC 4: Gộp CSV chunks
-    console.log(`📊 BƯỚC 4: Gộp ${successfulResults.length} clean CSV chunks`)
+    // 🔥 BƯỚC 5: Merge chunks back to consistent CSV
+    console.log(`📊 BƯỚC 5: Merge ${successfulResults.length} processed chunks...`)
 
     let combinedCSVData = ""
     let headers = ""
@@ -510,6 +609,7 @@ export const preprocessDataWithPipeline = async (
           headers = csvLines[0]
           allRows.push(...csvLines.slice(1))
         } else {
+          // 🔥 IMPORTANT: Skip header, only add data rows
           allRows.push(...csvLines.slice(1))
         }
         validChunks++
@@ -522,17 +622,18 @@ export const preprocessDataWithPipeline = async (
     combinedCSVData = headers + "\n" + allRows.join("\n")
     const finalTokens = estimateTokens(combinedCSVData)
 
-    console.log(`📊 Final Clean CSV: ${allRows.length} total rows, ${finalTokens} tokens`)
+    console.log(`📊 Final Consistent CSV: ${allRows.length} total rows, ${finalTokens} tokens`)
 
-    // Show final sample
-    const finalSample = combinedCSVData.split("\n").slice(0, 5)
-    console.log(`📋 Final clean CSV sample:`)
-    finalSample.forEach((line, i) => {
-      console.log(`  ${i === 0 ? "Header" : `Row ${i}`}: ${line}`)
-    })
+    // Validate final CSV consistency
+    const finalValidation = validateCSV(combinedCSVData)
+    console.log(`✅ Final CSV validation: ${finalValidation.isValid ? "PASSED" : "FAILED"}`)
+    if (finalValidation.isValid) {
+      console.log(`📊 Final CSV: ${finalValidation.rowCount} valid rows`)
+    }
 
-    // 🔥 BƯỚC 5: Phân tích tổng hợp
-    console.log(`🤖 BƯỚC 5: Phân tích clean CSV với API 5 - Model: ${SINGLE_MODEL}`)
+    // 🔥 BƯỚC 6: Analysis với API cuối cùng
+    const analysisAPIIndex = API_KEYS.length - 1
+    console.log(`🤖 BƯỚC 6: Analysis với API ${analysisAPIIndex + 1} (dedicated analysis API) - Model: ${SINGLE_MODEL}`)
 
     const analysisPrompt = `Phân tích dữ liệu CSV từ bảng "${tableName}" (${data.length} records):
 
@@ -545,18 +646,22 @@ Tóm tắt:
 
 Trả lời ngắn gọn bằng tiếng Việt.`
 
-    const finalAnalysis = await analyzeWithLlama(API_KEYS[4], analysisPrompt)
+    const finalAnalysis = await analyzeWithLlama(API_KEYS[analysisAPIIndex], analysisPrompt)
 
     const keyUsage = {
       totalKeys: API_KEYS.length,
+      processingKeys: processingAPICount,
+      analysisKeys: 1,
       processedChunks: successfulResults.length,
       successRate: `${Math.round((successfulResults.length / csvChunks.length) * 100)}%`,
       chunks: csvChunks.length,
       validChunks: validChunks,
       finalDataSize: combinedCSVData.length,
       finalTokens: finalTokens,
-      format: "Clean CSV",
+      format: "Consistent CSV",
       model: SINGLE_MODEL,
+      chunkingStrategy: "Smart by character count",
+      avgChunkEfficiency: Math.round(chunkStats.reduce((sum, stat) => sum + stat.efficiency, 0) / chunkStats.length),
     }
 
     return {
@@ -566,15 +671,15 @@ Trả lời ngắn gọn bằng tiếng Việt.`
       keyUsage: keyUsage,
     }
   } catch (error) {
-    console.error("❌ Clean CSV Pipeline failed:", error)
+    console.error("❌ Smart CSV Pipeline failed:", error)
 
-    // 🔥 IMPROVED: Always return clean raw CSV as fallback
+    // 🔥 IMPROVED: Always return consistent raw CSV as fallback
     const rawCSV = convertToCSV(data)
     return {
       success: true,
       optimizedData: rawCSV,
-      analysis: `❌ Pipeline error với ${SINGLE_MODEL}: ${error}. Sử dụng clean CSV với ${data.length} records.`,
-      keyUsage: { error: true, format: "Clean CSV", model: SINGLE_MODEL, fallback: true },
+      analysis: `❌ Pipeline error với ${SINGLE_MODEL}: ${error}. Sử dụng consistent CSV với ${data.length} records.`,
+      keyUsage: { error: true, format: "Consistent CSV", model: SINGLE_MODEL, fallback: true },
     }
   }
 }
@@ -628,7 +733,7 @@ export const answerQuestionWithOptimizedData = async (
   originalRecordCount: number,
 ): Promise<string> => {
   try {
-    console.log(`🤔 Trả lời câu hỏi với clean CSV data (${originalRecordCount} records)`)
+    console.log(`🤔 Trả lời câu hỏi với consistent CSV data (${originalRecordCount} records)`)
 
     // 🔥 IMPROVED: Truncate CSV if too long
     const maxCSVLength = 4000
@@ -643,8 +748,9 @@ Câu hỏi: ${question}
 
 Trả lời ngắn gọn bằng tiếng Việt:`
 
-    // CHỈ 1 REQUEST DUY NHẤT
-    return await analyzeWithLlama(API_KEYS[4], questionPrompt)
+    // CHỈ 1 REQUEST DUY NHẤT với analysis API
+    const analysisAPIIndex = API_KEYS.length - 1
+    return await analyzeWithLlama(API_KEYS[analysisAPIIndex], questionPrompt)
   } catch (error) {
     console.error("❌ answerQuestionWithOptimizedData failed:", error)
     return `❌ Lỗi khi trả lời câu hỏi với ${SINGLE_MODEL}: ${error}`
@@ -754,7 +860,7 @@ export const testGroqAPI = async () => {
     success: result.success,
     message: result.message,
     workingModel: SINGLE_MODEL,
-    format: "Clean CSV",
+    format: "Consistent CSV",
   }
 }
 
@@ -768,7 +874,7 @@ export const getApiKeysInfo = () => {
     keysPreview: API_KEYS.map(
       (key, index) => `API ${index + 1}: ${key.substring(0, 10)}...${key.substring(key.length - 4)} (${SINGLE_MODEL})`,
     ),
-    format: "Clean CSV",
+    format: "Consistent CSV",
     model: SINGLE_MODEL,
   }
 }
