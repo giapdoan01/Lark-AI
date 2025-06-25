@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react"
 import {
   getTableData,
   getTableStats,
+  getTableDataWithTypes, // ← Add this import
   testTableDataSample,
   checkSDKStatus,
   debugTableStructure,
@@ -294,7 +295,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     }
   }
 
-  // 🔥 UPDATED: Raw JSON preprocessing
+  // 🔥 UPDATED: Raw JSON preprocessing với field metadata
   const performDataPreprocessing = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
     if (data.length === 0 || hasRunPipeline.current) return
 
@@ -312,9 +313,13 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     setCurrentStep(4)
 
     try {
-      setProcessingStatus("🚀 Bắt đầu Raw JSON Pipeline (No CSV conversion)...")
+      setProcessingStatus("🚀 Bắt đầu Clean JSON Pipeline với field standardization...")
 
-      const result = await preprocessDataWithPipeline(data, tableName)
+      // Get enhanced field metadata
+      const { fieldTypes, fieldNames } = await getTableDataWithTypes(tableId)
+      const fieldMetadata = { fieldTypes, fieldNames }
+
+      const result = await preprocessDataWithPipeline(data, tableName, fieldMetadata)
 
       if (result.success) {
         setOptimizedData(result.optimizedData)
@@ -322,7 +327,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         setKeyUsageInfo(result.keyUsage)
         setIsDataReady(true)
         setCurrentStep(4)
-        setProcessingStatus("✅ Raw JSON Pipeline hoàn thành!")
+        setProcessingStatus("✅ Clean JSON Pipeline hoàn thành!")
       } else {
         setAutoAnalysis(result.analysis)
         setIsDataReady(false)
@@ -330,7 +335,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       }
     } catch (err) {
       console.error("❌ Pipeline error:", err)
-      setAutoAnalysis("❌ Không thể thực hiện Raw JSON pipeline.")
+      setAutoAnalysis("❌ Không thể thực hiện Clean JSON pipeline.")
       setIsDataReady(false)
       setProcessingStatus("❌ Pipeline lỗi")
       hasRunPipeline.current = false

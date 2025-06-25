@@ -103,7 +103,7 @@ export default function Home() {
                   >
                     1
                   </span>
-                  <span>Chọn bảng dữ liệu từ dropdown</span>
+                  <span>Chọn bảng dữ li��u từ dropdown</span>
                 </div>
                 <div style={{ marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
                   <span

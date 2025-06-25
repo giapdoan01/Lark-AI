@@ -404,23 +404,35 @@ export const getTableDataWithTypes = async (
   data: RecordData[]
   fieldTypes: Record<string, string>
   fieldNames: string[]
+  fieldMetadata: Array<{ id: string; name: string; type: string }>
 }> => {
   try {
-    console.log(`📥 Getting table data with field types: ${tableId}`)
+    console.log(`📥 Getting table data with enhanced field metadata: ${tableId}`)
 
     const table = await base.getTable(tableId)
     if (!table) {
       throw new Error("Không thể lấy table object")
     }
 
-    // Lấy field metadata
+    // Lấy field metadata chi tiết
     const fieldMetaList = await table.getFieldMetaList()
     const fieldTypes: Record<string, string> = {}
     const fieldNames: string[] = []
+    const fieldMetadata: Array<{ id: string; name: string; type: string }> = []
 
     fieldMetaList.forEach((field) => {
       fieldTypes[field.name] = field.type.toString()
       fieldNames.push(field.name)
+      fieldMetadata.push({
+        id: field.id || field.name,
+        name: field.name,
+        type: field.type.toString(),
+      })
+    })
+
+    console.log(`📋 Field metadata collected:`)
+    fieldMetadata.forEach((field) => {
+      console.log(`  "${field.name}" (${field.type}) [ID: ${field.id}]`)
     })
 
     // Lấy data
@@ -430,9 +442,10 @@ export const getTableDataWithTypes = async (
       data,
       fieldTypes,
       fieldNames,
+      fieldMetadata,
     }
   } catch (error) {
-    console.error("❌ Error getting table data with types:", error)
+    console.error("❌ Error getting table data with enhanced metadata:", error)
     throw error
   }
 }

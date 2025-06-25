@@ -19,146 +19,323 @@ const estimateTokens = (text: string): number => {
   return Math.ceil(text.length / 4)
 }
 
-// 🔥 NEW: Raw JSON preparation với data integrity protection
-const prepareRawJSONData = (
+// 🔥 ENHANCED: Clean and standardize JSON data với human-readable field names
+const prepareCleanJSONData = (
   data: Array<{ recordId: string; fields: Record<string, unknown> }>,
+  fieldMetadata?: { fieldTypes: Record<string, string>; fieldNames: string[] },
 ): {
   jsonData: string
   integrityReport: string
   stats: any
 } => {
-  console.log(`📊 ===== RAW JSON PREPARATION (NO CSV CONVERSION) =====`)
-  console.log(`📊 Preparing ${data.length} records as raw JSON...`)
+  console.log(`📊 ===== CLEAN JSON PREPARATION với DATA STANDARDIZATION =====`)
+  console.log(`📊 Cleaning and standardizing ${data.length} records...`)
 
-  // 🔍 STEP 1: Analyze data structure
-  const allFieldNames = new Set<string>()
-  const fieldStats: Record<
-    string,
-    { totalValues: number; emptyValues: number; uniqueTypes: Set<string>; samples: unknown[] }
-  > = {}
+  // 🔍 STEP 1: Create field name mapping (ID to human name)
+  const fieldNameMapping: Record<string, string> = {}
+  const humanReadableFields = new Set<string>()
 
-  data.forEach((record, recordIndex) => {
+  if (fieldMetadata && fieldMetadata.fieldNames) {
+    // Use provided field metadata
+    fieldMetadata.fieldNames.forEach((fieldName) => {
+      fieldNameMapping[fieldName] = fieldName // Already human readable
+      humanReadableFields.add(fieldName)
+    })
+    console.log(`📋 Using provided field metadata: ${fieldMetadata.fieldNames.length} fields`)
+  } else {
+    // Auto-detect and clean field names
+    data.forEach((record) => {
+      Object.keys(record.fields).forEach((fieldKey) => {
+        if (!fieldNameMapping[fieldKey]) {
+          // Clean field name - convert IDs to readable names
+          const cleanName = cleanFieldName(fieldKey)
+          fieldNameMapping[fieldKey] = cleanName
+          humanReadableFields.add(cleanName)
+        }
+      })
+    })
+    console.log(`📋 Auto-detected and cleaned ${Object.keys(fieldNameMapping).length} field names`)
+  }
+
+  console.log(`🔧 Field name mapping:`)
+  Object.entries(fieldNameMapping).forEach(([original, cleaned]) => {
+    if (original !== cleaned) {
+      console.log(`  "${original}" → "${cleaned}"`)
+    }
+  })
+
+  // 🔍 STEP 2: Clean and standardize each record
+  const cleanedData = data.map((record, index) => {
+    const cleanFields: Record<string, any> = {}
+
+    Object.entries(record.fields).forEach(([originalFieldName, fieldValue]) => {
+      const humanFieldName = fieldNameMapping[originalFieldName] || originalFieldName
+      const cleanValue = extractAndCleanFieldValue(fieldValue, humanFieldName)
+
+      // Only include fields with meaningful data
+      if (cleanValue !== null && cleanValue !== undefined && cleanValue !== "") {
+        cleanFields[humanFieldName] = cleanValue
+      }
+    })
+
+    return {
+      STT: index + 1,
+      recordId: record.recordId,
+      fields: cleanFields,
+    }
+  })
+
+  // 🔍 STEP 3: Analyze cleaned data quality
+  const allCleanFieldNames = new Set<string>()
+  const fieldStats: Record<string, { totalValues: number; emptyValues: number; samples: any[] }> = {}
+
+  cleanedData.forEach((record) => {
     Object.entries(record.fields).forEach(([fieldName, fieldValue]) => {
-      allFieldNames.add(fieldName)
+      allCleanFieldNames.add(fieldName)
 
       if (!fieldStats[fieldName]) {
-        fieldStats[fieldName] = {
-          totalValues: 0,
-          emptyValues: 0,
-          uniqueTypes: new Set(),
-          samples: [],
-        }
+        fieldStats[fieldName] = { totalValues: 0, emptyValues: 0, samples: [] }
       }
 
       fieldStats[fieldName].totalValues++
-      fieldStats[fieldName].uniqueTypes.add(typeof fieldValue)
 
       if (fieldValue === null || fieldValue === undefined || fieldValue === "") {
         fieldStats[fieldName].emptyValues++
       } else {
-        // Collect samples for analysis (first 3 non-empty values)
+        // Collect samples
         if (fieldStats[fieldName].samples.length < 3) {
           fieldStats[fieldName].samples.push(fieldValue)
         }
       }
-
-      // Log first few samples for debugging
-      if (recordIndex < 3) {
-        console.log(`🔍 Record ${recordIndex + 1}, Field "${fieldName}":`, fieldValue)
-      }
     })
   })
 
-  const fieldNames = Array.from(allFieldNames).sort()
-  console.log(`📋 Found ${fieldNames.length} unique fields:`, fieldNames)
+  const cleanFieldNames = Array.from(allCleanFieldNames).sort()
+  console.log(`📋 Clean field names (${cleanFieldNames.length}):`, cleanFieldNames)
 
-  // 🔍 STEP 2: Create comprehensive field analysis
-  console.log(`📊 Field Analysis:`)
-  fieldNames.forEach((fieldName) => {
-    const stats = fieldStats[fieldName]
-    const fillRate = (((stats.totalValues - stats.emptyValues) / stats.totalValues) * 100).toFixed(1)
-    const types = Array.from(stats.uniqueTypes).join(", ")
-    console.log(`  "${fieldName}": ${stats.totalValues} values, ${fillRate}% filled, types: ${types}`)
-
-    // Log sample values for debugging
-    if (stats.samples.length > 0) {
-      console.log(
-        `    Samples:`,
-        stats.samples.map((s) =>
-          typeof s === "object" ? JSON.stringify(s).substring(0, 50) + "..." : String(s).substring(0, 50),
-        ),
-      )
-    }
-  })
-
-  // 🔍 STEP 3: Prepare clean JSON structure
-  const cleanedData = data.map((record, index) => ({
-    STT: index + 1,
-    recordId: record.recordId,
-    fields: record.fields,
-  }))
-
-  // 🔍 STEP 4: Generate JSON string
+  // 🔍 STEP 4: Generate clean JSON
   const jsonData = JSON.stringify(cleanedData, null, 2)
 
-  // 🔍 STEP 5: Calculate statistics
-  const totalPossibleValues = data.length * fieldNames.length
+  // 🔍 STEP 5: Calculate quality metrics
+  const totalPossibleValues = cleanedData.length * cleanFieldNames.length
   const totalActualValues = Object.values(fieldStats).reduce(
     (sum, stat) => sum + (stat.totalValues - stat.emptyValues),
     0,
   )
-  const dataIntegrityRate = ((totalActualValues / totalPossibleValues) * 100).toFixed(1)
+  const dataQualityRate = ((totalActualValues / totalPossibleValues) * 100).toFixed(1)
 
   const jsonSize = jsonData.length
   const estimatedTokens = estimateTokens(jsonData)
 
-  // 🔍 STEP 6: Create integrity report
+  // 🔍 STEP 6: Create comprehensive report
   const integrityReport = `
-📊 RAW JSON DATA INTEGRITY REPORT:
-  ✅ Total records: ${data.length}
-  ✅ Total fields: ${fieldNames.length}
+📊 CLEAN JSON DATA REPORT:
+  ✅ Total records: ${cleanedData.length}
+  ✅ Clean field names: ${cleanFieldNames.length}
   ✅ Total possible values: ${totalPossibleValues}
   ✅ Actual values with data: ${totalActualValues}
-  ✅ Data integrity rate: ${dataIntegrityRate}%
+  ✅ Data quality rate: ${dataQualityRate}%
   ✅ JSON size: ${jsonSize} characters
   ✅ Estimated tokens: ${estimatedTokens}
   
-📋 Field Quality Summary:
-${fieldNames
+📋 Clean Field Quality:
+${cleanFieldNames
   .map((fieldName) => {
     const stats = fieldStats[fieldName]
+    if (!stats) return `  • "${fieldName}": No data`
     const fillRate = (((stats.totalValues - stats.emptyValues) / stats.totalValues) * 100).toFixed(1)
-    return `  • "${fieldName}": ${fillRate}% filled (${stats.totalValues - stats.emptyValues}/${stats.totalValues})`
+    const sampleText = stats.samples.length > 0 ? ` (e.g: ${stats.samples[0]})` : ""
+    return `  • "${fieldName}": ${fillRate}% filled${sampleText}`
   })
   .join("\n")}
 
-🔍 Data Structure: Raw JSON preserves ALL original field structures
-🔍 No conversion loss: 100% original Lark Base data maintained
+🔍 Data Structure: Clean JSON với human-readable field names
+🔍 Field standardization: Converted IDs to meaningful names
+🔍 Value extraction: Cleaned complex Lark Base objects
   `
 
-  console.log(`✅ ===== RAW JSON PREPARATION COMPLETE =====`)
-  console.log(`📊 Records: ${data.length}`)
-  console.log(`📋 Fields: ${fieldNames.length}`)
+  console.log(`✅ ===== CLEAN JSON PREPARATION COMPLETE =====`)
+  console.log(`📊 Records: ${cleanedData.length}`)
+  console.log(`📋 Clean fields: ${cleanFieldNames.length}`)
   console.log(`📄 JSON size: ${jsonSize} characters`)
   console.log(`🎯 Estimated tokens: ${estimatedTokens}`)
-  console.log(`🔍 Data integrity rate: ${dataIntegrityRate}%`)
-  console.log(`✅ NO CONVERSION LOSS - Raw JSON maintains 100% original data`)
+  console.log(`🔍 Data quality rate: ${dataQualityRate}%`)
+  console.log(`✅ STANDARDIZED - Human-readable field names and clean values`)
   console.log(`===============================================`)
 
   return {
     jsonData,
     integrityReport,
     stats: {
-      totalRecords: data.length,
-      totalFields: fieldNames.length,
+      totalRecords: cleanedData.length,
+      totalFields: cleanFieldNames.length,
       totalPossibleValues,
       totalActualValues,
-      dataIntegrityRate: Number.parseFloat(dataIntegrityRate),
+      dataQualityRate: Number.parseFloat(dataQualityRate),
       jsonSize,
       estimatedTokens,
       fieldStats,
+      fieldNameMapping,
     },
   }
+}
+
+// 🔥 NEW: Clean field name function
+const cleanFieldName = (fieldName: string): string => {
+  // Handle Lark Base field IDs like "fldwRXU3jn"
+  if (fieldName.match(/^fld[a-zA-Z0-9]+$/)) {
+    return `Field_${fieldName.substring(3)}` // Convert fldwRXU3jn → Field_wRXU3jn
+  }
+
+  // Handle other ID patterns
+  if (fieldName.match(/^[a-zA-Z0-9]{8,}$/)) {
+    return `Field_${fieldName.substring(0, 8)}` // Truncate long IDs
+  }
+
+  // Clean special characters but keep meaningful names
+  const cleaned = fieldName
+    .replace(/[^a-zA-Z0-9\s\-_]/g, "") // Remove special chars except space, dash, underscore
+    .replace(/\s+/g, " ") // Normalize spaces
+    .trim()
+
+  // If result is empty or too short, use original with prefix
+  if (cleaned.length < 2) {
+    return `Field_${fieldName}`
+  }
+
+  return cleaned
+}
+
+// 🔥 ENHANCED: Extract and clean field values
+const extractAndCleanFieldValue = (value: unknown, fieldName?: string): any => {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  // Handle primitive types
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    return trimmed === "" ? null : trimmed
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value
+  }
+
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value.toISOString().split("T")[0] // Return just date part
+  }
+
+  // Handle objects and arrays
+  if (typeof value === "object") {
+    try {
+      const jsonStr = JSON.stringify(value)
+
+      // 🔥 PATTERN 1: Lark Base Text Objects
+      if (jsonStr.includes('"type":"text"') && jsonStr.includes('"text":')) {
+        const textMatches = jsonStr.match(/"text":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/g)
+        if (textMatches) {
+          const texts = textMatches
+            .map((match) => {
+              const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/)
+              return textMatch ? textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
+            })
+            .filter((text) => text.length > 0)
+
+          return texts.length === 1 ? texts[0] : texts.join(", ")
+        }
+      }
+
+      // 🔥 PATTERN 2: Option Objects
+      if (jsonStr.includes('"text":') && (jsonStr.includes('"id":') || jsonStr.includes('"color":'))) {
+        const textMatches = jsonStr.match(/"text":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/g)
+        if (textMatches) {
+          const texts = textMatches
+            .map((match) => {
+              const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/)
+              return textMatch ? textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
+            })
+            .filter((text) => text.length > 0)
+
+          return texts.length === 1 ? texts[0] : texts.join(", ")
+        }
+      }
+
+      // 🔥 PATTERN 3: User Objects
+      if (jsonStr.includes('"name":') && (jsonStr.includes('"id":') || jsonStr.includes('"email":'))) {
+        const nameMatches = jsonStr.match(/"name":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/g)
+        if (nameMatches) {
+          const names = nameMatches
+            .map((match) => {
+              const nameMatch = match.match(/"name":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/)
+              return nameMatch ? nameMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
+            })
+            .filter((name) => name.length > 0)
+
+          return names.length === 1 ? names[0] : names.join(", ")
+        }
+      }
+
+      // 🔥 PATTERN 4: Attachment Objects
+      if (jsonStr.includes('"name":') && (jsonStr.includes('"url":') || jsonStr.includes('"size":'))) {
+        const nameMatches = jsonStr.match(/"name":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/g)
+        if (nameMatches) {
+          const names = nameMatches
+            .map((match) => {
+              const nameMatch = match.match(/"name":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/)
+              return nameMatch ? nameMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
+            })
+            .filter((name) => name.length > 0)
+
+          return names.length === 1 ? names[0] : names.join(", ")
+        }
+      }
+
+      // 🔥 PATTERN 5: Arrays of values
+      if (Array.isArray(value)) {
+        const cleanValues = value
+          .map((item) => extractAndCleanFieldValue(item, fieldName))
+          .filter((item) => item !== null && item !== undefined && item !== "")
+
+        return cleanValues.length === 0 ? null : cleanValues.length === 1 ? cleanValues[0] : cleanValues.join(", ")
+      }
+
+      // 🔥 PATTERN 6: Generic object - extract meaningful values
+      const extractObjectValues = (obj: any): string[] => {
+        const values: string[] = []
+
+        for (const [key, val] of Object.entries(obj)) {
+          if (val === null || val === undefined) continue
+
+          if (typeof val === "string" && val.trim() !== "") {
+            values.push(val.trim())
+          } else if (typeof val === "number") {
+            values.push(String(val))
+          } else if (typeof val === "boolean") {
+            values.push(val ? "Yes" : "No")
+          }
+        }
+
+        return values
+      }
+
+      const objectValues = extractObjectValues(value)
+      if (objectValues.length > 0) {
+        return objectValues.length === 1 ? objectValues[0] : objectValues.join(", ")
+      }
+
+      // Fallback: return null for complex objects we can't parse
+      return null
+    } catch (error) {
+      console.warn(`⚠️ Error cleaning field "${fieldName}":`, error)
+      return null
+    }
+  }
+
+  // Final fallback
+  return String(value).substring(0, 100)
 }
 
 // 🔥 NEW: Validate raw JSON data integrity
@@ -489,9 +666,10 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng:`
 }
 
 // 🔥 UPDATED: Main pipeline với raw JSON (no CSV conversion)
-export const preprocessDataWithPipeline = async (
+export const preprocessDataWithRawJSONPipeline = async (
   data: any[],
   tableName: string,
+  fieldMetadata?: { fieldTypes: Record<string, string>; fieldNames: string[] },
 ): Promise<{ success: boolean; optimizedData: string; analysis: string; keyUsage: any }> => {
   try {
     console.log(`🚀 Raw JSON Pipeline (NO CSV CONVERSION) với ${data.length} records - Model: ${SINGLE_MODEL}`)
@@ -500,9 +678,9 @@ export const preprocessDataWithPipeline = async (
       throw new Error("Cần ít nhất 1 API key")
     }
 
-    // 🔥 BƯỚC 1: Prepare raw JSON data (NO CSV conversion)
-    console.log(`📊 BƯỚC 1: Preparing raw JSON data (bypassing CSV conversion)...`)
-    const { jsonData, integrityReport, stats } = prepareRawJSONData(data)
+    // 🔥 BƯỚC 1: Prepare clean JSON data với field metadata
+    console.log(`📊 BƯỚC 1: Preparing clean JSON data với field standardization...`)
+    const { jsonData, integrityReport, stats } = prepareCleanJSONData(data, fieldMetadata)
 
     if (!jsonData) {
       throw new Error("Không thể tạo JSON data")
@@ -577,7 +755,7 @@ export const preprocessDataWithPipeline = async (
   } catch (error) {
     console.error("❌ Raw JSON Pipeline failed:", error)
 
-    const { jsonData } = prepareRawJSONData(data)
+    const { jsonData } = prepareCleanJSONData(data)
     return {
       success: true,
       optimizedData: jsonData,
@@ -595,7 +773,7 @@ export const preprocessDataWithPipeline = async (
 }
 
 // 🔥 UPDATED: Answer question với raw JSON
-export const answerQuestionWithOptimizedData = async (
+const answerQuestionWithOptimizedData = async (
   optimizedJSONData: string,
   tableName: string,
   question: string,
@@ -629,7 +807,7 @@ Phân tích dữ liệu JSON thực tế và trả lời chi tiết bằng tiế
 
 1. **Trả lời trực tiếp câu hỏi** dựa trên dữ liệu JSON có sẵn
 2. **Dẫn chứng cụ thể** từ JSON data (STT, recordId, field values)
-3. **Extract values** từ Lark Base objects (text objects, option objects, etc.)
+3. **Extract values** từ Lark Base objects (text objects, option objects, user objects, etc.)
 4. **Insights bổ sung** nếu có từ data patterns
 5. **Data quality notes** nếu cần thiết
 
@@ -668,7 +846,7 @@ Trả lời:`
 }
 
 // Export functions
-export const analyzeDataWithParallelKeys = preprocessDataWithPipeline
+export const analyzeDataWithParallelKeys = preprocessDataWithRawJSONPipeline
 
 export const answerQuestionWithData = async (
   data: any[],
@@ -682,7 +860,7 @@ export const answerQuestionWithData = async (
       return await answerQuestionWithOptimizedData(optimizedData, tableName, question, data.length)
     } else {
       // Use raw JSON for quick questions too
-      const { jsonData } = prepareRawJSONData(data.slice(0, 30))
+      const { jsonData } = prepareCleanJSONData(data.slice(0, 30))
       return await answerQuestionWithOptimizedData(jsonData, tableName, question, data.length)
     }
   } catch (error) {
@@ -797,3 +975,5 @@ export const clearApiCache = () => {
   testResultsCache.clear()
   console.log("🔄 Cache cleared")
 }
+
+export const preprocessDataWithPipeline = preprocessDataWithRawJSONPipeline
