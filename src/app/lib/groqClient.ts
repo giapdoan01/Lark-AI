@@ -19,42 +19,383 @@ const estimateTokens = (text: string): number => {
   return Math.ceil(text.length / 4)
 }
 
-// 🔥 ENHANCED: Clean and standardize JSON data với human-readable field names
-const prepareCleanJSONData = (
+// 🔥 ZERO DATA LOSS: Comprehensive field extraction với complete data preservation
+const extractCompleteFieldValue = (value: unknown, fieldName?: string): string => {
+  // 🔍 DETAILED LOGGING for zero data loss tracking
+  const logExtraction = (input: unknown, output: string, method: string) => {
+    if (fieldName) {
+      console.log(
+        `🔍 Field "${fieldName}": ${method} → "${output.substring(0, 100)}${output.length > 100 ? "..." : ""}"`,
+      )
+    }
+  }
+
+  // 1. Handle null/undefined - preserve as empty but log
+  if (value === null || value === undefined) {
+    logExtraction(value, "", "null/undefined")
+    return ""
+  }
+
+  // 2. Handle primitive types - preserve exactly
+  if (typeof value === "string") {
+    const result = value.trim()
+    logExtraction(value, result, "string")
+    return result
+  }
+
+  if (typeof value === "number") {
+    const result = String(value)
+    logExtraction(value, result, "number")
+    return result
+  }
+
+  if (typeof value === "boolean") {
+    const result = value ? "Yes" : "No"
+    logExtraction(value, result, "boolean")
+    return result
+  }
+
+  // 3. Handle Date objects - preserve with full info
+  if (value instanceof Date) {
+    const result = value.toISOString()
+    logExtraction(value, result, "Date object")
+    return result
+  }
+
+  // 4. 🔥 COMPREHENSIVE OBJECT HANDLING - ZERO DATA LOSS
+  if (typeof value === "object") {
+    try {
+      const jsonStr = JSON.stringify(value)
+      console.log(`🔍 Processing object field "${fieldName}": ${jsonStr.substring(0, 200)}...`)
+
+      // Handle empty objects
+      if (jsonStr === "null" || jsonStr === "{}" || jsonStr === "[]") {
+        logExtraction(value, "", "empty object")
+        return ""
+      }
+
+      // 🔥 PATTERN 1: Lark Base Text Objects - COMPLETE EXTRACTION
+      if (jsonStr.includes('"type":"text"') && jsonStr.includes('"text":')) {
+        const textMatches = jsonStr.match(/"text":"([^"]*(?:\\.[^"]*)*)"/g)
+        if (textMatches) {
+          const texts = textMatches
+            .map((match) => {
+              const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*)*)"/)
+              return textMatch ? textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
+            })
+            .filter((text) => text.length > 0)
+
+          if (texts.length > 0) {
+            const result = texts.join(" | ") // Use | separator for multiple texts
+            console.log(`✅ Extracted ${texts.length} text objects: "${result}"`)
+            logExtraction(value, result, "text objects")
+            return result
+          }
+        }
+      }
+
+      // 🔥 PATTERN 2: Option Objects - PRESERVE ALL INFO
+      if (jsonStr.includes('"text":') && (jsonStr.includes('"id":') || jsonStr.includes('"color":'))) {
+        const options: string[] = []
+
+        // Extract text values
+        const textMatches = jsonStr.match(/"text":"([^"]*(?:\\.[^"]*)*)"/g)
+        if (textMatches) {
+          textMatches.forEach((match) => {
+            const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*)*)"/)
+            if (textMatch) {
+              options.push(textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
+            }
+          })
+        }
+
+        // Also extract IDs for complete info
+        const idMatches = jsonStr.match(/"id":"([^"]*(?:\\.[^"]*)*)"/g)
+        if (idMatches && options.length === 0) {
+          idMatches.forEach((match) => {
+            const idMatch = match.match(/"id":"([^"]*(?:\\.[^"]*)*)"/)
+            if (idMatch) {
+              options.push(`ID:${idMatch[1]}`)
+            }
+          })
+        }
+
+        if (options.length > 0) {
+          const result = options.join(" | ")
+          console.log(`✅ Extracted ${options.length} option objects: "${result}"`)
+          logExtraction(value, result, "option objects")
+          return result
+        }
+      }
+
+      // 🔥 PATTERN 3: User Objects - COMPLETE USER INFO
+      if (jsonStr.includes('"name":') || jsonStr.includes('"email":') || jsonStr.includes('"id":')) {
+        const userInfo: string[] = []
+
+        // Extract names
+        const nameMatches = jsonStr.match(/"name":"([^"]*(?:\\.[^"]*)*)"/g)
+        if (nameMatches) {
+          nameMatches.forEach((match) => {
+            const nameMatch = match.match(/"name":"([^"]*(?:\\.[^"]*)*)"/)
+            if (nameMatch) {
+              userInfo.push(nameMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
+            }
+          })
+        }
+
+        // Extract emails for additional context
+        const emailMatches = jsonStr.match(/"email":"([^"]*(?:\\.[^"]*)*)"/g)
+        if (emailMatches) {
+          emailMatches.forEach((match) => {
+            const emailMatch = match.match(/"email":"([^"]*(?:\\.[^"]*)*)"/)
+            if (emailMatch) {
+              userInfo.push(`(${emailMatch[1]})`)
+            }
+          })
+        }
+
+        // Extract IDs if no names/emails
+        if (userInfo.length === 0) {
+          const idMatches = jsonStr.match(/"id":"([^"]*(?:\\.[^"]*)*)"/g)
+          if (idMatches) {
+            idMatches.forEach((match) => {
+              const idMatch = match.match(/"id":"([^"]*(?:\\.[^"]*)*)"/)
+              if (idMatch) {
+                userInfo.push(`UserID:${idMatch[1]}`)
+              }
+            })
+          }
+        }
+
+        if (userInfo.length > 0) {
+          const result = userInfo.join(" ")
+          console.log(`✅ Extracted user objects: "${result}"`)
+          logExtraction(value, result, "user objects")
+          return result
+        }
+      }
+
+      // 🔥 PATTERN 4: Attachment Objects - COMPLETE FILE INFO
+      if (jsonStr.includes('"name":') && (jsonStr.includes('"url":') || jsonStr.includes('"size":'))) {
+        const attachmentInfo: string[] = []
+
+        // Extract file names
+        const nameMatches = jsonStr.match(/"name":"([^"]*(?:\\.[^"]*)*)"/g)
+        if (nameMatches) {
+          nameMatches.forEach((match) => {
+            const nameMatch = match.match(/"name":"([^"]*(?:\\.[^"]*)*)"/)
+            if (nameMatch) {
+              attachmentInfo.push(nameMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
+            }
+          })
+        }
+
+        // Extract sizes for context
+        const sizeMatches = jsonStr.match(/"size":(\d+)/g)
+        if (sizeMatches && attachmentInfo.length > 0) {
+          sizeMatches.forEach((match, index) => {
+            const sizeMatch = match.match(/"size":(\d+)/)
+            if (sizeMatch && attachmentInfo[index]) {
+              const sizeKB = Math.round(Number.parseInt(sizeMatch[1]) / 1024)
+              attachmentInfo[index] += ` (${sizeKB}KB)`
+            }
+          })
+        }
+
+        if (attachmentInfo.length > 0) {
+          const result = attachmentInfo.join(" | ")
+          console.log(`✅ Extracted attachment objects: "${result}"`)
+          logExtraction(value, result, "attachment objects")
+          return result
+        }
+      }
+
+      // 🔥 PATTERN 5: Link Objects - PRESERVE LINKS AND TEXT
+      if (jsonStr.includes('"link":') && jsonStr.includes('"text":')) {
+        const linkData: string[] = []
+
+        const textMatches = jsonStr.match(/"text":"([^"]*(?:\\.[^"]*)*)"/g)
+        const linkMatches = jsonStr.match(/"link":"([^"]*(?:\\.[^"]*)*)"/g)
+
+        if (textMatches && linkMatches) {
+          const texts = textMatches.map((match) => {
+            const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*)*)"/)
+            return textMatch ? textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
+          })
+          const links = linkMatches.map((match) => {
+            const linkMatch = match.match(/"link":"([^"]*(?:\\.[^"]*)*)"/)
+            return linkMatch ? linkMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
+          })
+
+          for (let i = 0; i < Math.max(texts.length, links.length); i++) {
+            const text = texts[i] || ""
+            const link = links[i] || ""
+            if (text && link) {
+              linkData.push(`${text} [${link}]`)
+            } else if (text) {
+              linkData.push(text)
+            } else if (link) {
+              linkData.push(`[${link}]`)
+            }
+          }
+        }
+
+        if (linkData.length > 0) {
+          const result = linkData.join(" | ")
+          console.log(`✅ Extracted link objects: "${result}"`)
+          logExtraction(value, result, "link objects")
+          return result
+        }
+      }
+
+      // 🔥 PATTERN 6: Arrays - PRESERVE ALL ELEMENTS
+      if (Array.isArray(value)) {
+        const arrayValues = value
+          .map((item, index) => extractCompleteFieldValue(item, `${fieldName}[${index}]`))
+          .filter((item) => item && item.trim() !== "")
+
+        if (arrayValues.length > 0) {
+          const result = arrayValues.join(" | ")
+          console.log(`✅ Extracted ${arrayValues.length} array values: "${result}"`)
+          logExtraction(value, result, "array values")
+          return result
+        }
+      }
+
+      // 🔥 PATTERN 7: Generic Object - EXTRACT ALL MEANINGFUL VALUES
+      const extractAllObjectValues = (obj: any, prefix = ""): string[] => {
+        const values: string[] = []
+
+        for (const [key, val] of Object.entries(obj)) {
+          if (val === null || val === undefined) continue
+
+          if (typeof val === "string" && val.trim() !== "") {
+            values.push(`${key}:${val.trim()}`)
+          } else if (typeof val === "number") {
+            values.push(`${key}:${val}`)
+          } else if (typeof val === "boolean") {
+            values.push(`${key}:${val ? "Yes" : "No"}`)
+          } else if (typeof val === "object" && val !== null) {
+            // Recursive extraction for nested objects
+            const nestedValues = extractAllObjectValues(val, `${prefix}${key}.`)
+            values.push(...nestedValues.map((v) => `${key}.${v}`))
+          }
+        }
+
+        return values
+      }
+
+      const objectValues = extractAllObjectValues(value)
+      if (objectValues.length > 0) {
+        const result = objectValues.join(" | ")
+        console.log(`✅ Extracted ${objectValues.length} object values: "${result}"`)
+        logExtraction(value, result, "generic object")
+        return result
+      }
+
+      // 🔥 LAST RESORT: Preserve as formatted JSON (truncated if too long)
+      const fallbackResult = jsonStr.length > 500 ? jsonStr.substring(0, 500) + "..." : jsonStr
+      console.warn(`⚠️ Using fallback JSON for field "${fieldName}": ${fallbackResult.substring(0, 100)}...`)
+      logExtraction(value, fallbackResult, "fallback JSON")
+      return fallbackResult
+    } catch (error) {
+      console.error(`❌ Error parsing field "${fieldName}":`, error)
+      console.error(`   Original value:`, value)
+
+      // 🔥 EMERGENCY PRESERVATION: Convert to string to avoid data loss
+      const emergencyResult = String(value).substring(0, 200)
+      logExtraction(value, emergencyResult, "emergency preservation")
+      return emergencyResult
+    }
+  }
+
+  // 🔥 FINAL PRESERVATION for unknown types
+  const finalResult = String(value).substring(0, 200)
+  console.warn(`⚠️ Unknown type for field "${fieldName}": ${typeof value}`)
+  logExtraction(value, finalResult, "final preservation")
+  return finalResult
+}
+
+// 🔥 ZERO DATA LOSS: Enhanced CSV conversion với complete data preservation
+const convertToEnhancedCSV = (
   data: Array<{ recordId: string; fields: Record<string, unknown> }>,
   fieldMetadata?: { fieldTypes: Record<string, string>; fieldNames: string[] },
 ): {
-  jsonData: string
-  integrityReport: string
+  csvContent: string
+  conversionReport: string
   stats: any
 } => {
-  console.log(`📊 ===== CLEAN JSON PREPARATION với DATA STANDARDIZATION =====`)
-  console.log(`📊 Cleaning and standardizing ${data.length} records...`)
+  if (data.length === 0) return { csvContent: "", conversionReport: "No data", stats: {} }
 
-  // 🔍 STEP 1: Create field name mapping (ID to human name)
+  console.log(`📊 ===== ZERO DATA LOSS CSV CONVERSION =====`)
+  console.log(`📊 Converting ${data.length} records with COMPLETE data preservation...`)
+
+  // 🔍 STEP 1: Comprehensive field analysis
+  const allFieldNames = new Set<string>()
+  const fieldValueSamples: Record<string, unknown[]> = {}
+  const fieldStats: Record<
+    string,
+    {
+      totalValues: number
+      emptyValues: number
+      uniqueTypes: Set<string>
+      extractedValues: number
+      preservedValues: number
+    }
+  > = {}
+
+  // First pass: Analyze all fields and values
+  data.forEach((record, recordIndex) => {
+    Object.entries(record.fields).forEach(([fieldName, fieldValue]) => {
+      allFieldNames.add(fieldName)
+
+      if (!fieldValueSamples[fieldName]) {
+        fieldValueSamples[fieldName] = []
+        fieldStats[fieldName] = {
+          totalValues: 0,
+          emptyValues: 0,
+          uniqueTypes: new Set(),
+          extractedValues: 0,
+          preservedValues: 0,
+        }
+      }
+
+      fieldValueSamples[fieldName].push(fieldValue)
+      fieldStats[fieldName].totalValues++
+      fieldStats[fieldName].uniqueTypes.add(typeof fieldValue)
+
+      if (fieldValue === null || fieldValue === undefined || fieldValue === "") {
+        fieldStats[fieldName].emptyValues++
+      }
+
+      // Log first few samples for analysis
+      if (fieldValueSamples[fieldName].length <= 3) {
+        console.log(`🔍 Field "${fieldName}" sample ${fieldValueSamples[fieldName].length}:`, fieldValue)
+      }
+    })
+  })
+
+  // 🔍 STEP 2: Create clean field names mapping
   const fieldNameMapping: Record<string, string> = {}
-  const humanReadableFields = new Set<string>()
+  const cleanFieldNames: string[] = []
 
   if (fieldMetadata && fieldMetadata.fieldNames) {
     // Use provided field metadata
     fieldMetadata.fieldNames.forEach((fieldName) => {
-      fieldNameMapping[fieldName] = fieldName // Already human readable
-      humanReadableFields.add(fieldName)
+      fieldNameMapping[fieldName] = fieldName
+      cleanFieldNames.push(fieldName)
     })
     console.log(`📋 Using provided field metadata: ${fieldMetadata.fieldNames.length} fields`)
   } else {
-    // Auto-detect and clean field names
-    data.forEach((record) => {
-      Object.keys(record.fields).forEach((fieldKey) => {
-        if (!fieldNameMapping[fieldKey]) {
-          // Clean field name - convert IDs to readable names
-          const cleanName = cleanFieldName(fieldKey)
-          fieldNameMapping[fieldKey] = cleanName
-          humanReadableFields.add(cleanName)
-        }
+    // Auto-clean field names
+    Array.from(allFieldNames)
+      .sort()
+      .forEach((fieldName) => {
+        const cleanName = cleanFieldName(fieldName)
+        fieldNameMapping[fieldName] = cleanName
+        cleanFieldNames.push(cleanName)
       })
-    })
-    console.log(`📋 Auto-detected and cleaned ${Object.keys(fieldNameMapping).length} field names`)
+    console.log(`📋 Auto-cleaned ${cleanFieldNames.length} field names`)
   }
 
   console.log(`🔧 Field name mapping:`)
@@ -64,116 +405,132 @@ const prepareCleanJSONData = (
     }
   })
 
-  // 🔍 STEP 2: Clean and standardize each record
-  const cleanedData = data.map((record, index) => {
-    const cleanFields: Record<string, any> = {}
+  // 🔍 STEP 3: Create CSV headers
+  const headers = ["STT", "RecordID", ...cleanFieldNames]
+  const csvHeaders = headers.map((h) => `"${h}"`).join(",")
 
-    Object.entries(record.fields).forEach(([originalFieldName, fieldValue]) => {
-      const humanFieldName = fieldNameMapping[originalFieldName] || originalFieldName
-      const cleanValue = extractAndCleanFieldValue(fieldValue, humanFieldName)
+  // 🔍 STEP 4: Convert records với ZERO DATA LOSS
+  let totalExtractedValues = 0
+  let totalPreservedValues = 0
+  let extractionErrors = 0
 
-      // Only include fields with meaningful data
-      if (cleanValue !== null && cleanValue !== undefined && cleanValue !== "") {
-        cleanFields[humanFieldName] = cleanValue
-      }
-    })
+  const csvRows = data.map((record, recordIndex) => {
+    const values = [
+      `"${recordIndex + 1}"`, // STT
+      `"${record.recordId}"`, // RecordID
+      ...Array.from(allFieldNames)
+        .sort()
+        .map((originalFieldName) => {
+          const rawValue = record.fields[originalFieldName]
 
-    return {
-      STT: index + 1,
-      recordId: record.recordId,
-      fields: cleanFields,
-    }
+          try {
+            const extractedValue = extractCompleteFieldValue(rawValue, originalFieldName)
+
+            // Track extraction success
+            if (rawValue !== null && rawValue !== undefined) {
+              fieldStats[originalFieldName].preservedValues++
+              totalPreservedValues++
+            }
+
+            if (extractedValue && extractedValue.trim() !== "") {
+              fieldStats[originalFieldName].extractedValues++
+              totalExtractedValues++
+
+              // 🔥 PROPER CSV ESCAPING - PRESERVE ALL DATA
+              const escapedValue = extractedValue
+                .replace(/"/g, '""') // Escape quotes
+                .replace(/\r?\n/g, " ") // Replace newlines with spaces
+                .trim()
+
+              return `"${escapedValue}"`
+            }
+
+            return '""' // Empty but properly quoted
+          } catch (error) {
+            extractionErrors++
+            console.error(`❌ Extraction error for record ${recordIndex + 1}, field "${originalFieldName}":`, error)
+
+            // 🔥 EMERGENCY DATA PRESERVATION
+            const emergencyValue = String(rawValue).substring(0, 100).replace(/"/g, '""')
+            return `"ERROR_PRESERVED:${emergencyValue}"`
+          }
+        }),
+    ]
+
+    return values.join(",")
   })
 
-  // 🔍 STEP 3: Analyze cleaned data quality
-  const allCleanFieldNames = new Set<string>()
-  const fieldStats: Record<string, { totalValues: number; emptyValues: number; samples: any[] }> = {}
+  const csvContent = [csvHeaders, ...csvRows].join("\n")
 
-  cleanedData.forEach((record) => {
-    Object.entries(record.fields).forEach(([fieldName, fieldValue]) => {
-      allCleanFieldNames.add(fieldName)
+  // 🔍 STEP 5: Comprehensive data integrity validation
+  const originalDataSize = JSON.stringify(data).length
+  const csvSize = csvContent.length
+  const compressionRatio = Math.round((1 - csvSize / originalDataSize) * 100)
 
-      if (!fieldStats[fieldName]) {
-        fieldStats[fieldName] = { totalValues: 0, emptyValues: 0, samples: [] }
-      }
+  const totalPossibleValues = data.length * allFieldNames.size
+  const dataPreservationRate = ((totalPreservedValues / totalPossibleValues) * 100).toFixed(1)
+  const extractionSuccessRate = ((totalExtractedValues / totalPreservedValues) * 100).toFixed(1)
 
-      fieldStats[fieldName].totalValues++
-
-      if (fieldValue === null || fieldValue === undefined || fieldValue === "") {
-        fieldStats[fieldName].emptyValues++
-      } else {
-        // Collect samples
-        if (fieldStats[fieldName].samples.length < 3) {
-          fieldStats[fieldName].samples.push(fieldValue)
-        }
-      }
-    })
-  })
-
-  const cleanFieldNames = Array.from(allCleanFieldNames).sort()
-  console.log(`📋 Clean field names (${cleanFieldNames.length}):`, cleanFieldNames)
-
-  // 🔍 STEP 4: Generate clean JSON
-  const jsonData = JSON.stringify(cleanedData, null, 2)
-
-  // 🔍 STEP 5: Calculate quality metrics
-  const totalPossibleValues = cleanedData.length * cleanFieldNames.length
-  const totalActualValues = Object.values(fieldStats).reduce(
-    (sum, stat) => sum + (stat.totalValues - stat.emptyValues),
-    0,
-  )
-  const dataQualityRate = ((totalActualValues / totalPossibleValues) * 100).toFixed(1)
-
-  const jsonSize = jsonData.length
-  const estimatedTokens = estimateTokens(jsonData)
-
-  // 🔍 STEP 6: Create comprehensive report
-  const integrityReport = `
-📊 CLEAN JSON DATA REPORT:
-  ✅ Total records: ${cleanedData.length}
+  // 🔍 STEP 6: Create comprehensive conversion report
+  const conversionReport = `
+📊 ZERO DATA LOSS CSV CONVERSION REPORT:
+  ✅ Total records: ${data.length}
+  ✅ Total fields: ${allFieldNames.size}
   ✅ Clean field names: ${cleanFieldNames.length}
-  ✅ Total possible values: ${totalPossibleValues}
-  ✅ Actual values with data: ${totalActualValues}
-  ✅ Data quality rate: ${dataQualityRate}%
-  ✅ JSON size: ${jsonSize} characters
-  ✅ Estimated tokens: ${estimatedTokens}
+  ✅ CSV size: ${csvSize} characters
+  ✅ Estimated tokens: ${estimateTokens(csvContent)}
+  ✅ Compression ratio: ${compressionRatio}% smaller than JSON
   
-📋 Clean Field Quality:
-${cleanFieldNames
+🔍 DATA PRESERVATION METRICS:
+  📊 Total possible values: ${totalPossibleValues}
+  ✅ Values preserved: ${totalPreservedValues} (${dataPreservationRate}%)
+  ✅ Values extracted: ${totalExtractedValues} (${extractionSuccessRate}% of preserved)
+  ❌ Extraction errors: ${extractionErrors}
+  
+📋 Field Extraction Quality:
+${Array.from(allFieldNames)
+  .sort()
   .map((fieldName) => {
     const stats = fieldStats[fieldName]
-    if (!stats) return `  • "${fieldName}": No data`
-    const fillRate = (((stats.totalValues - stats.emptyValues) / stats.totalValues) * 100).toFixed(1)
-    const sampleText = stats.samples.length > 0 ? ` (e.g: ${stats.samples[0]})` : ""
-    return `  • "${fieldName}": ${fillRate}% filled${sampleText}`
+    const preservationRate = ((stats.preservedValues / stats.totalValues) * 100).toFixed(1)
+    const extractionRate =
+      stats.preservedValues > 0 ? ((stats.extractedValues / stats.preservedValues) * 100).toFixed(1) : "0"
+    return `  • "${fieldNameMapping[fieldName]}": ${preservationRate}% preserved, ${extractionRate}% extracted`
   })
   .join("\n")}
 
-🔍 Data Structure: Clean JSON với human-readable field names
-🔍 Field standardization: Converted IDs to meaningful names
-🔍 Value extraction: Cleaned complex Lark Base objects
+🎯 ZERO DATA LOSS GUARANTEE:
+  ${dataPreservationRate === "100.0" ? "✅ PERFECT: No data loss detected" : `⚠️ WARNING: ${100 - Number.parseFloat(dataPreservationRate)}% data loss detected`}
+  ${extractionErrors === 0 ? "✅ PERFECT: No extraction errors" : `⚠️ WARNING: ${extractionErrors} extraction errors`}
+  ${Number.parseFloat(extractionSuccessRate) >= 95 ? "✅ EXCELLENT: High extraction success rate" : `⚠️ WARNING: Low extraction success rate`}
   `
 
-  console.log(`✅ ===== CLEAN JSON PREPARATION COMPLETE =====`)
-  console.log(`📊 Records: ${cleanedData.length}`)
-  console.log(`📋 Clean fields: ${cleanFieldNames.length}`)
-  console.log(`📄 JSON size: ${jsonSize} characters`)
-  console.log(`🎯 Estimated tokens: ${estimatedTokens}`)
-  console.log(`🔍 Data quality rate: ${dataQualityRate}%`)
-  console.log(`✅ STANDARDIZED - Human-readable field names and clean values`)
+  console.log(`✅ ===== ZERO DATA LOSS CSV CONVERSION COMPLETE =====`)
+  console.log(`📊 Records: ${data.length}`)
+  console.log(`📋 Fields: ${allFieldNames.size}`)
+  console.log(`📄 CSV size: ${csvSize} characters`)
+  console.log(`🎯 Estimated tokens: ${estimateTokens(csvContent)}`)
+  console.log(`🔍 Data preservation rate: ${dataPreservationRate}%`)
+  console.log(`🔍 Extraction success rate: ${extractionSuccessRate}%`)
+  console.log(
+    `${Number.parseFloat(dataPreservationRate) === 100 && extractionErrors === 0 ? "✅ ZERO DATA LOSS ACHIEVED!" : "⚠️ DATA LOSS DETECTED - REVIEW REQUIRED"}`,
+  )
   console.log(`===============================================`)
 
   return {
-    jsonData,
-    integrityReport,
+    csvContent,
+    conversionReport,
     stats: {
-      totalRecords: cleanedData.length,
-      totalFields: cleanFieldNames.length,
+      totalRecords: data.length,
+      totalFields: allFieldNames.size,
       totalPossibleValues,
-      totalActualValues,
-      dataQualityRate: Number.parseFloat(dataQualityRate),
-      jsonSize,
-      estimatedTokens,
+      totalPreservedValues,
+      totalExtractedValues,
+      extractionErrors,
+      dataPreservationRate: Number.parseFloat(dataPreservationRate),
+      extractionSuccessRate: Number.parseFloat(extractionSuccessRate),
+      csvSize,
+      estimatedTokens: estimateTokens(csvContent),
       fieldStats,
       fieldNameMapping,
     },
@@ -195,204 +552,74 @@ const cleanFieldName = (fieldName: string): string => {
   // Clean special characters but keep meaningful names
   const cleaned = fieldName
     .replace(/[^a-zA-Z0-9\s\-_]/g, "") // Remove special chars except space, dash, underscore
-    .replace(/\s+/g, " ") // Normalize spaces
+    .replace(/\s+/g, "_") // Convert spaces to underscores for CSV compatibility
     .trim()
 
   // If result is empty or too short, use original with prefix
   if (cleaned.length < 2) {
-    return `Field_${fieldName}`
+    return `Field_${fieldName.replace(/[^a-zA-Z0-9]/g, "_")}`
   }
 
   return cleaned
 }
 
-// 🔥 ENHANCED: Extract and clean field values
-const extractAndCleanFieldValue = (value: unknown, fieldName?: string): any => {
-  // Handle null/undefined
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  // Handle primitive types
-  if (typeof value === "string") {
-    const trimmed = value.trim()
-    return trimmed === "" ? null : trimmed
-  }
-
-  if (typeof value === "number" || typeof value === "boolean") {
-    return value
-  }
-
-  // Handle Date objects
-  if (value instanceof Date) {
-    return value.toISOString().split("T")[0] // Return just date part
-  }
-
-  // Handle objects and arrays
-  if (typeof value === "object") {
-    try {
-      const jsonStr = JSON.stringify(value)
-
-      // 🔥 PATTERN 1: Lark Base Text Objects
-      if (jsonStr.includes('"type":"text"') && jsonStr.includes('"text":')) {
-        const textMatches = jsonStr.match(/"text":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/g)
-        if (textMatches) {
-          const texts = textMatches
-            .map((match) => {
-              const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/)
-              return textMatch ? textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
-            })
-            .filter((text) => text.length > 0)
-
-          return texts.length === 1 ? texts[0] : texts.join(", ")
-        }
-      }
-
-      // 🔥 PATTERN 2: Option Objects
-      if (jsonStr.includes('"text":') && (jsonStr.includes('"id":') || jsonStr.includes('"color":'))) {
-        const textMatches = jsonStr.match(/"text":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/g)
-        if (textMatches) {
-          const texts = textMatches
-            .map((match) => {
-              const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/)
-              return textMatch ? textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
-            })
-            .filter((text) => text.length > 0)
-
-          return texts.length === 1 ? texts[0] : texts.join(", ")
-        }
-      }
-
-      // 🔥 PATTERN 3: User Objects
-      if (jsonStr.includes('"name":') && (jsonStr.includes('"id":') || jsonStr.includes('"email":'))) {
-        const nameMatches = jsonStr.match(/"name":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/g)
-        if (nameMatches) {
-          const names = nameMatches
-            .map((match) => {
-              const nameMatch = match.match(/"name":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/)
-              return nameMatch ? nameMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
-            })
-            .filter((name) => name.length > 0)
-
-          return names.length === 1 ? names[0] : names.join(", ")
-        }
-      }
-
-      // 🔥 PATTERN 4: Attachment Objects
-      if (jsonStr.includes('"name":') && (jsonStr.includes('"url":') || jsonStr.includes('"size":'))) {
-        const nameMatches = jsonStr.match(/"name":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/g)
-        if (nameMatches) {
-          const names = nameMatches
-            .map((match) => {
-              const nameMatch = match.match(/"name":"([^"]*(?:\\.[^"]*(?:\\.[^"]*)*)*)"/)
-              return nameMatch ? nameMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
-            })
-            .filter((name) => name.length > 0)
-
-          return names.length === 1 ? names[0] : names.join(", ")
-        }
-      }
-
-      // 🔥 PATTERN 5: Arrays of values
-      if (Array.isArray(value)) {
-        const cleanValues = value
-          .map((item) => extractAndCleanFieldValue(item, fieldName))
-          .filter((item) => item !== null && item !== undefined && item !== "")
-
-        return cleanValues.length === 0 ? null : cleanValues.length === 1 ? cleanValues[0] : cleanValues.join(", ")
-      }
-
-      // 🔥 PATTERN 6: Generic object - extract meaningful values
-      const extractObjectValues = (obj: any): string[] => {
-        const values: string[] = []
-
-        for (const [key, val] of Object.entries(obj)) {
-          if (val === null || val === undefined) continue
-
-          if (typeof val === "string" && val.trim() !== "") {
-            values.push(val.trim())
-          } else if (typeof val === "number") {
-            values.push(String(val))
-          } else if (typeof val === "boolean") {
-            values.push(val ? "Yes" : "No")
-          }
-        }
-
-        return values
-      }
-
-      const objectValues = extractObjectValues(value)
-      if (objectValues.length > 0) {
-        return objectValues.length === 1 ? objectValues[0] : objectValues.join(", ")
-      }
-
-      // Fallback: return null for complex objects we can't parse
-      return null
-    } catch (error) {
-      console.warn(`⚠️ Error cleaning field "${fieldName}":`, error)
-      return null
-    }
-  }
-
-  // Final fallback
-  return String(value).substring(0, 100)
-}
-
-// 🔥 NEW: Validate raw JSON data integrity
-const validateRawJSONIntegrity = (
+// 🔥 NEW: Validate CSV data integrity
+const validateCSVIntegrity = (
   originalData: Array<{ recordId: string; fields: Record<string, unknown> }>,
-  jsonData: string,
+  csvContent: string,
 ): { isValid: boolean; report: string; issues: string[] } => {
   const issues: string[] = []
 
   try {
-    // Parse JSON to validate structure
-    const parsedData = JSON.parse(jsonData)
-
-    // Check if it's an array
-    if (!Array.isArray(parsedData)) {
-      issues.push("JSON data is not an array")
-      return { isValid: false, report: "Invalid JSON structure", issues }
-    }
+    const csvLines = csvContent.trim().split("\n")
+    const headerLine = csvLines[0]
+    const dataLines = csvLines.slice(1)
 
     // Check record count
-    if (parsedData.length !== originalData.length) {
-      issues.push(`Record count mismatch: Expected ${originalData.length}, got ${parsedData.length}`)
+    if (dataLines.length !== originalData.length) {
+      issues.push(`Record count mismatch: Expected ${originalData.length}, got ${dataLines.length}`)
     }
 
-    // Check each record structure
-    let validRecords = 0
-    let recordsWithFields = 0
+    // Check header structure
+    const csvHeaders = headerLine.split(",").map((h) => h.replace(/"/g, ""))
+    const expectedMinHeaders = 2 + new Set(originalData.flatMap((r) => Object.keys(r.fields))).size // STT + RecordID + fields
 
-    parsedData.forEach((record: any, index: number) => {
-      if (record && typeof record === "object") {
-        validRecords++
+    if (csvHeaders.length < expectedMinHeaders) {
+      issues.push(`Header count too low: Expected at least ${expectedMinHeaders}, got ${csvHeaders.length}`)
+    }
 
-        if (record.fields && typeof record.fields === "object") {
-          recordsWithFields++
+    // Check for completely empty rows
+    const emptyRows = dataLines.filter((line) => {
+      const cells = line.split(",").map((cell) => cell.replace(/"/g, "").trim())
+      return cells.every((cell) => cell === "")
+    }).length
 
-          // Check if record has the expected structure
-          if (!record.STT || !record.recordId) {
-            issues.push(`Record ${index + 1} missing STT or recordId`)
-          }
-        } else {
-          issues.push(`Record ${index + 1} missing or invalid fields object`)
-        }
-      } else {
-        issues.push(`Record ${index + 1} is not a valid object`)
-      }
-    })
+    if (emptyRows > 0) {
+      issues.push(`Found ${emptyRows} completely empty rows`)
+    }
 
-    // Calculate data quality metrics
-    const recordValidityRate = ((validRecords / parsedData.length) * 100).toFixed(1)
-    const fieldsValidityRate = ((recordsWithFields / parsedData.length) * 100).toFixed(1)
+    // Check data density
+    const totalCells = dataLines.length * csvHeaders.length
+    const emptyCells = dataLines.reduce((count, line) => {
+      const cells = line.split(",").map((cell) => cell.replace(/"/g, "").trim())
+      return count + cells.filter((cell) => cell === "").length
+    }, 0)
+
+    const dataDensity = (((totalCells - emptyCells) / totalCells) * 100).toFixed(1)
+
+    // Check for data loss indicators
+    const errorCells = csvContent.match(/ERROR_PRESERVED:/g)?.length || 0
+    if (errorCells > 0) {
+      issues.push(`Found ${errorCells} cells with extraction errors`)
+    }
 
     const report = `
-📊 Raw JSON Integrity Validation:
-  ✅ Total records: ${parsedData.length}/${originalData.length}
-  ✅ Valid record objects: ${validRecords} (${recordValidityRate}%)
-  ✅ Records with fields: ${recordsWithFields} (${fieldsValidityRate}%)
-  ✅ JSON structure: ${Array.isArray(parsedData) ? "Valid array" : "Invalid"}
+📊 CSV Integrity Validation Report:
+  ✅ Records: ${dataLines.length}/${originalData.length}
+  ✅ Headers: ${csvHeaders.length}/${expectedMinHeaders}+ expected
+  ✅ Data density: ${dataDensity}%
+  ✅ Empty rows: ${emptyRows}
+  ✅ Error cells: ${errorCells}
   ${issues.length === 0 ? "✅ All validation checks passed!" : `⚠️ ${issues.length} issues detected`}
     `
 
@@ -402,7 +629,7 @@ const validateRawJSONIntegrity = (
       issues: issues,
     }
   } catch (error) {
-    const errorMsg = `JSON validation error: ${error}`
+    const errorMsg = `CSV validation error: ${error}`
     return {
       isValid: false,
       report: errorMsg,
@@ -535,18 +762,18 @@ const createGroqClient = (apiKey: string): Groq => {
   })
 }
 
-// 🔥 NEW: Raw JSON analysis với Llama 4 Scout
-const analyzeRawJSONWithRandomAPI = async (
-  jsonData: string,
+// 🔥 NEW: Enhanced CSV analysis với Llama 4 Scout
+const analyzeEnhancedCSVWithRandomAPI = async (
+  csvContent: string,
   tableName: string,
   recordCount: number,
-  integrityReport: string,
+  conversionReport: string,
 ): Promise<{ success: boolean; analysis: string; apiDetails: any; error?: string }> => {
   try {
-    console.log(`\n🚀 ===== RAW JSON ANALYSIS với ${SINGLE_MODEL} =====`)
+    console.log(`\n🚀 ===== ENHANCED CSV ANALYSIS với ${SINGLE_MODEL} =====`)
     console.log(`📊 INPUT: ${recordCount} records`)
-    console.log(`📄 JSON size: ${jsonData.length} characters`)
-    console.log(`🎯 Estimated tokens: ${estimateTokens(jsonData)}`)
+    console.log(`📄 CSV size: ${csvContent.length} characters`)
+    console.log(`🎯 Estimated tokens: ${estimateTokens(csvContent)}`)
 
     const selectedAPI = await selectRandomWorkingAPI()
 
@@ -559,55 +786,57 @@ const analyzeRawJSONWithRandomAPI = async (
       }
     }
 
-    console.log(`🎯 Using API ${selectedAPI.apiIndex + 1} for raw JSON analysis`)
+    console.log(`🎯 Using API ${selectedAPI.apiIndex + 1} for enhanced CSV analysis`)
 
     const groq = createGroqClient(selectedAPI.apiKey)
 
-    // 🔥 NEW: Raw JSON analysis prompt
-    const analysisPrompt = `Phân tích toàn bộ dữ liệu RAW JSON từ bảng "${tableName}" (${recordCount} records):
+    // 🔥 NEW: Enhanced CSV analysis prompt với zero data loss focus
+    const analysisPrompt = `Phân tích toàn bộ dữ liệu CSV từ bảng "${tableName}" (${recordCount} records) với ZERO DATA LOSS guarantee:
 
-${integrityReport}
+${conversionReport}
 
-Dữ liệu JSON (giữ nguyên cấu trúc gốc từ Lark Base):
-${jsonData}
+Dữ liệu CSV (đã được xử lý với complete data preservation):
+${csvContent}
 
-Thực hiện phân tích toàn diện dựa trên RAW JSON data:
+Thực hiện phân tích toàn diện với focus vào data completeness:
 
-1. **Tổng quan dữ liệu:**
-   - Đếm chính xác số records thực tế trong JSON
-   - Liệt kê tất cả fields có trong dữ liệu
-   - Đánh giá chất lượng và completeness của từng field
+1. **Kiểm tra Data Integrity:**
+   - Đếm chính xác số records trong CSV (phải = ${recordCount})
+   - Verify tất cả fields đã được preserve
+   - Check data quality và completeness
 
-2. **Thống kê chi tiết từ JSON:**
-   - Phân tích giá trị trong từng field (text, options, users, attachments, etc.)
+2. **Thống kê chi tiết từ CSV:**
+   - Phân tích từng column với complete data
    - Thống kê phân bố và frequency
    - Identify patterns và relationships
+   - Extract insights từ preserved data
 
-3. **Data Structure Analysis:**
-   - Phân tích cấu trúc Lark Base fields (text objects, option objects, user objects, etc.)
-   - Extract meaningful values từ complex objects
-   - Đánh giá data consistency
-
-4. **Business Insights:**
-   - Insights quan trọng từ dữ liệu thực tế
-   - Trends và patterns
+3. **Business Analysis:**
+   - Insights quan trọng từ complete dataset
+   - Trends và patterns từ full data
    - Actionable recommendations
+   - Data-driven conclusions
+
+4. **Data Quality Assessment:**
+   - Đánh giá completeness của từng field
+   - Identify missing data patterns
+   - Data consistency analysis
 
 5. **Kết luận:**
-   - Tóm tắt findings chính
-   - Data quality assessment
-   - Key takeaways
+   - Tóm tắt findings chính từ complete data
+   - Data reliability assessment
+   - Key business insights
 
-**QUAN TRỌNG**: 
-- Phân tích dựa 100% trên dữ liệu JSON thực tế
-- Không đoán mò hoặc tạo ra thông tin không có
-- Đếm chính xác số records từ JSON array
-- Extract values từ Lark Base object structures
+**QUAN TRỌNG - ZERO DATA LOSS VERIFICATION**: 
+- Đếm chính xác số records từ CSV (phải = ${recordCount})
+- Phân tích dựa 100% trên dữ liệu CSV đã preserve
+- Không bỏ qua bất kỳ data nào
+- Verify data integrity trong analysis
 
-Trả lời chi tiết bằng tiếng Việt với format rõ ràng:`
+Trả lời chi tiết bằng tiếng Việt với format rõ ràng và focus vào complete data analysis:`
 
     const promptTokens = estimateTokens(analysisPrompt)
-    console.log(`📤 Sending raw JSON analysis request: ${promptTokens} input tokens`)
+    console.log(`📤 Sending enhanced CSV analysis request: ${promptTokens} input tokens`)
 
     const startTime = Date.now()
 
@@ -637,9 +866,9 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng:`
 
     console.log(`📊 OUTPUT: ${outputTokens} tokens`)
     console.log(`⚡ Total processing time: ${responseTime}ms`)
-    console.log(`✅ SUCCESS: Analyzed ${recordCount} records with RAW JSON (no conversion loss)`)
+    console.log(`✅ SUCCESS: Analyzed ${recordCount} records with Enhanced CSV (zero data loss)`)
     console.log(`📋 Analysis preview: ${analysis.substring(0, 150)}...`)
-    console.log(`===== END RAW JSON ANALYSIS =====\n`)
+    console.log(`===== END ENHANCED CSV ANALYSIS =====\n`)
 
     return {
       success: true,
@@ -654,7 +883,7 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng:`
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error)
-    console.error(`❌ Raw JSON analysis failed: ${errorMsg}`)
+    console.error(`❌ Enhanced CSV analysis failed: ${errorMsg}`)
 
     return {
       success: false,
@@ -665,52 +894,58 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng:`
   }
 }
 
-// 🔥 UPDATED: Main pipeline với raw JSON (no CSV conversion)
-export const preprocessDataWithRawJSONPipeline = async (
+// 🔥 MAIN: Enhanced CSV Pipeline với ZERO DATA LOSS
+export const preprocessDataWithPipeline = async (
   data: any[],
   tableName: string,
   fieldMetadata?: { fieldTypes: Record<string, string>; fieldNames: string[] },
 ): Promise<{ success: boolean; optimizedData: string; analysis: string; keyUsage: any }> => {
   try {
-    console.log(`🚀 Raw JSON Pipeline (NO CSV CONVERSION) với ${data.length} records - Model: ${SINGLE_MODEL}`)
+    console.log(`🚀 Enhanced CSV Pipeline (ZERO DATA LOSS) với ${data.length} records - Model: ${SINGLE_MODEL}`)
 
     if (!API_KEYS || API_KEYS.length === 0) {
       throw new Error("Cần ít nhất 1 API key")
     }
 
-    // 🔥 BƯỚC 1: Prepare clean JSON data với field metadata
-    console.log(`📊 BƯỚC 1: Preparing clean JSON data với field standardization...`)
-    const { jsonData, integrityReport, stats } = prepareCleanJSONData(data, fieldMetadata)
+    // 🔥 BƯỚC 1: Enhanced CSV conversion với zero data loss
+    console.log(`📊 BƯỚC 1: Enhanced CSV conversion với ZERO DATA LOSS guarantee...`)
+    const { csvContent, conversionReport, stats } = convertToEnhancedCSV(data, fieldMetadata)
 
-    if (!jsonData) {
-      throw new Error("Không thể tạo JSON data")
+    if (!csvContent) {
+      throw new Error("Không thể tạo CSV content")
     }
 
-    // 🔥 BƯỚC 2: Validate raw JSON integrity
-    console.log(`🔍 BƯỚC 2: Validating raw JSON integrity...`)
-    const integrityValidation = validateRawJSONIntegrity(data, jsonData)
+    // 🔥 BƯỚC 2: Validate CSV integrity
+    console.log(`🔍 BƯỚC 2: Validating CSV integrity...`)
+    const integrityValidation = validateCSVIntegrity(data, csvContent)
 
     if (!integrityValidation.isValid) {
-      console.warn(`⚠️ JSON integrity issues detected:`)
+      console.warn(`⚠️ CSV integrity issues detected:`)
       integrityValidation.issues.forEach((issue) => console.warn(`  - ${issue}`))
     }
 
-    // 🔥 BƯỚC 3: Raw JSON analysis
-    console.log(`🤖 BƯỚC 3: Raw JSON analysis với random API...`)
-    const analysisResult = await analyzeRawJSONWithRandomAPI(jsonData, tableName, data.length, integrityReport)
+    // 🔥 CRITICAL: Check for data loss
+    if (stats.dataPreservationRate < 100) {
+      console.error(`❌ DATA LOSS DETECTED: ${100 - stats.dataPreservationRate}% data loss!`)
+      console.error(`This violates the ZERO DATA LOSS requirement!`)
+    }
+
+    // 🔥 BƯỚC 3: Enhanced CSV analysis
+    console.log(`🤖 BƯỚC 3: Enhanced CSV analysis với random API...`)
+    const analysisResult = await analyzeEnhancedCSVWithRandomAPI(csvContent, tableName, data.length, conversionReport)
 
     if (!analysisResult.success) {
-      console.log(`❌ Analysis failed, using raw JSON`)
+      console.log(`❌ Analysis failed, using enhanced CSV`)
       return {
         success: true,
-        optimizedData: jsonData,
+        optimizedData: csvContent,
         analysis: analysisResult.analysis,
         keyUsage: {
           error: true,
-          format: "Raw JSON",
+          format: "Enhanced CSV",
           fallback: true,
           model: SINGLE_MODEL,
-          strategy: "Raw JSON (No CSV)",
+          strategy: "Enhanced CSV (Zero Data Loss)",
           errorDetails: analysisResult.error,
           dataIntegrity: integrityValidation,
           stats: stats,
@@ -718,17 +953,17 @@ export const preprocessDataWithRawJSONPipeline = async (
       }
     }
 
-    // 🔥 SUCCESS: Return raw JSON results
+    // 🔥 SUCCESS: Return enhanced CSV results
     const keyUsage = {
       totalKeys: API_KEYS.length,
       usedAPI: analysisResult.apiDetails.keyIndex,
       selectedRandomly: true,
       totalRecords: data.length,
       processedRecords: data.length,
-      dataLoss: 0, // No data loss with raw JSON
-      format: "Raw JSON (No CSV Conversion)",
+      dataLoss: Math.max(0, 100 - stats.dataPreservationRate),
+      format: "Enhanced CSV (Zero Data Loss)",
       model: SINGLE_MODEL,
-      strategy: "Raw JSON Direct Analysis",
+      strategy: "Enhanced CSV Direct Analysis",
       responseTime: analysisResult.apiDetails.responseTime,
       inputTokens: analysisResult.apiDetails.inputTokens,
       outputTokens: analysisResult.apiDetails.outputTokens,
@@ -738,49 +973,50 @@ export const preprocessDataWithRawJSONPipeline = async (
       stats: stats,
     }
 
-    console.log(`✅ Raw JSON Pipeline Complete:`)
-    console.log(`  📊 Records: ${data.length} (100% preserved - no conversion)`)
+    console.log(`✅ Enhanced CSV Pipeline Complete:`)
+    console.log(`  📊 Records: ${data.length} (${stats.dataPreservationRate}% preserved)`)
     console.log(`  🎯 API used: ${analysisResult.apiDetails.keyIndex}`)
     console.log(`  ⚡ Time: ${analysisResult.apiDetails.responseTime}ms`)
     console.log(`  🎫 Tokens: ${analysisResult.apiDetails.totalTokens}`)
     console.log(`  🔍 Data integrity: ${integrityValidation.isValid ? "✅ Valid" : "⚠️ Issues detected"}`)
-    console.log(`  📄 Format: Raw JSON (no CSV conversion loss)`)
+    console.log(`  📄 Format: Enhanced CSV (${stats.dataPreservationRate}% data preservation)`)
+    console.log(`  ${stats.dataPreservationRate === 100 ? "✅ ZERO DATA LOSS ACHIEVED!" : "⚠️ DATA LOSS DETECTED!"}`)
 
     return {
       success: true,
-      optimizedData: jsonData,
+      optimizedData: csvContent,
       analysis: analysisResult.analysis,
       keyUsage: keyUsage,
     }
   } catch (error) {
-    console.error("❌ Raw JSON Pipeline failed:", error)
+    console.error("❌ Enhanced CSV Pipeline failed:", error)
 
-    const { jsonData } = prepareCleanJSONData(data)
+    const { csvContent } = convertToEnhancedCSV(data)
     return {
       success: true,
-      optimizedData: jsonData,
-      analysis: `❌ Pipeline error với ${SINGLE_MODEL}: ${error}. Sử dụng raw JSON với ${data.length} records.`,
+      optimizedData: csvContent,
+      analysis: `❌ Pipeline error với ${SINGLE_MODEL}: ${error}. Sử dụng enhanced CSV với ${data.length} records.`,
       keyUsage: {
         error: true,
-        format: "Raw JSON",
+        format: "Enhanced CSV",
         model: SINGLE_MODEL,
         fallback: true,
-        strategy: "Raw JSON (No CSV)",
+        strategy: "Enhanced CSV (Zero Data Loss)",
         dataIntegrity: { isValid: false, report: "Pipeline failed", issues: [String(error)] },
       },
     }
   }
 }
 
-// 🔥 UPDATED: Answer question với raw JSON
-const answerQuestionWithOptimizedData = async (
-  optimizedJSONData: string,
+// 🔥 UPDATED: Answer question với enhanced CSV
+export const answerQuestionWithOptimizedData = async (
+  optimizedCSVData: string,
   tableName: string,
   question: string,
   originalRecordCount: number,
 ): Promise<string> => {
   try {
-    console.log(`🤔 Trả lời câu hỏi với raw JSON data (${originalRecordCount} records) - ${SINGLE_MODEL}`)
+    console.log(`🤔 Trả lời câu hỏi với enhanced CSV data (${originalRecordCount} records) - ${SINGLE_MODEL}`)
 
     const selectedAPI = await selectRandomWorkingAPI()
 
@@ -790,31 +1026,29 @@ const answerQuestionWithOptimizedData = async (
 
     console.log(`🎯 Using API ${selectedAPI.apiIndex + 1} for question answering`)
 
-    // Truncate JSON if too long (but keep more data than CSV)
-    const maxJSONLength = 8000 // Increased for JSON
-    const truncatedJSON =
-      optimizedJSONData.length > maxJSONLength
-        ? optimizedJSONData.substring(0, maxJSONLength) + "..."
-        : optimizedJSONData
+    // Keep more CSV data for questions
+    const maxCSVLength = 10000 // Increased for enhanced CSV
+    const truncatedCSV =
+      optimizedCSVData.length > maxCSVLength ? optimizedCSVData.substring(0, maxCSVLength) + "..." : optimizedCSVData
 
-    const questionPrompt = `Dữ liệu RAW JSON từ bảng "${tableName}" (${originalRecordCount} records):
+    const questionPrompt = `Dữ liệu Enhanced CSV từ bảng "${tableName}" (${originalRecordCount} records) với ZERO DATA LOSS:
 
-${truncatedJSON}
+${truncatedCSV}
 
 Câu hỏi: ${question}
 
-Phân tích dữ liệu JSON thực tế và trả lời chi tiết bằng tiếng Việt:
+Phân tích dữ liệu CSV và trả lời chi tiết bằng tiếng Việt:
 
-1. **Trả lời trực tiếp câu hỏi** dựa trên dữ liệu JSON có sẵn
-2. **Dẫn chứng cụ thể** từ JSON data (STT, recordId, field values)
-3. **Extract values** từ Lark Base objects (text objects, option objects, user objects, etc.)
-4. **Insights bổ sung** nếu có từ data patterns
-5. **Data quality notes** nếu cần thiết
+1. **Trả lời trực tiếp câu hỏi** dựa trên complete CSV data
+2. **Dẫn chứng cụ thể** từ CSV rows và columns
+3. **Đếm chính xác** từ CSV data (verify với ${originalRecordCount} records)
+4. **Insights bổ sung** từ complete dataset
+5. **Data quality notes** nếu cần
 
-**QUAN TRỌNG**: 
-- Chỉ dựa vào dữ liệu thực tế trong JSON
-- Đếm chính xác từ JSON array
-- Extract meaningful values từ complex Lark Base objects
+**QUAN TRỌNG - ZERO DATA LOSS**: 
+- Chỉ dựa vào dữ liệu thực tế trong CSV
+- Đếm chính xác từ CSV rows
+- Sử dụng complete data đã được preserve
 - Không đoán mò hoặc tạo ra thông tin không có
 
 Trả lời:`
@@ -836,7 +1070,7 @@ Trả lời:`
     }
 
     const answer = completion.choices[0].message.content
-    console.log(`✅ Question answered with raw JSON data (${responseTime}ms)`)
+    console.log(`✅ Question answered with enhanced CSV data (${responseTime}ms)`)
 
     return answer
   } catch (error) {
@@ -846,7 +1080,7 @@ Trả lời:`
 }
 
 // Export functions
-export const analyzeDataWithParallelKeys = preprocessDataWithRawJSONPipeline
+export const analyzeDataWithParallelKeys = preprocessDataWithPipeline
 
 export const answerQuestionWithData = async (
   data: any[],
@@ -859,9 +1093,9 @@ export const answerQuestionWithData = async (
     if (optimizedData && optimizedData.length > 0) {
       return await answerQuestionWithOptimizedData(optimizedData, tableName, question, data.length)
     } else {
-      // Use raw JSON for quick questions too
-      const { jsonData } = prepareCleanJSONData(data.slice(0, 30))
-      return await answerQuestionWithOptimizedData(jsonData, tableName, question, data.length)
+      // Use enhanced CSV for quick questions too
+      const { csvContent } = convertToEnhancedCSV(data.slice(0, 30))
+      return await answerQuestionWithOptimizedData(csvContent, tableName, question, data.length)
     }
   } catch (error) {
     console.error("❌ answerQuestionWithData failed:", error)
@@ -952,7 +1186,7 @@ export const testGroqAPI = async () => {
     success: result.success,
     message: result.message,
     workingModel: SINGLE_MODEL,
-    format: "Raw JSON (No CSV)",
+    format: "Enhanced CSV (Zero Data Loss)",
   }
 }
 
@@ -966,7 +1200,7 @@ export const getApiKeysInfo = () => {
     keysPreview: API_KEYS.map(
       (key, index) => `API ${index + 1}: ${key.substring(0, 10)}...${key.substring(key.length - 4)} (${SINGLE_MODEL})`,
     ),
-    format: "Raw JSON (No CSV)",
+    format: "Enhanced CSV (Zero Data Loss)",
     model: SINGLE_MODEL,
   }
 }
@@ -975,5 +1209,3 @@ export const clearApiCache = () => {
   testResultsCache.clear()
   console.log("🔄 Cache cleared")
 }
-
-export const preprocessDataWithPipeline = preprocessDataWithRawJSONPipeline

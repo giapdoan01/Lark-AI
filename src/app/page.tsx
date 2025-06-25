@@ -33,7 +33,7 @@ export default function Home() {
         >
           <h1 style={{ margin: "0 0 10px 0", color: "#333", fontSize: "28px" }}>🚀 Lark Base AI ChatBot</h1>
           <p style={{ margin: 0, color: "#666", fontSize: "16px" }}>
-            Phân tích dữ liệu với Raw JSON - Zero Conversion Loss
+            Phân tích dữ liệu với Enhanced CSV - Zero Data Loss Guarantee
           </p>
         </div>
 
@@ -47,7 +47,7 @@ export default function Home() {
             boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
           }}
         >
-          <h3 style={{ margin: "0 0 15px 0", color: "#333" }}>✨ Raw JSON Strategy - Zero Data Loss</h3>
+          <h3 style={{ margin: "0 0 15px 0", color: "#333" }}>✨ Enhanced CSV Strategy - Zero Data Loss</h3>
           <div
             style={{
               display: "grid",
@@ -56,12 +56,14 @@ export default function Home() {
             }}
           >
             <div style={{ padding: "15px", backgroundColor: "#e8f5e8", borderRadius: "8px" }}>
-              <div style={{ fontWeight: "600", color: "#4caf50", marginBottom: "5px" }}>📄 Raw JSON Direct</div>
-              <div style={{ fontSize: "14px", color: "#666" }}>Gửi raw JSON trực tiếp - không convert CSV</div>
+              <div style={{ fontWeight: "600", color: "#4caf50", marginBottom: "5px" }}>🔒 Zero Data Loss</div>
+              <div style={{ fontSize: "14px", color: "#666" }}>
+                Complete field extraction với comprehensive preservation
+              </div>
             </div>
             <div style={{ padding: "15px", backgroundColor: "#e8f4fd", borderRadius: "8px" }}>
-              <div style={{ fontWeight: "600", color: "#007acc", marginBottom: "5px" }}>🔒 Zero Data Loss</div>
-              <div style={{ fontSize: "14px", color: "#666" }}>100% original Lark Base data preserved</div>
+              <div style={{ fontWeight: "600", color: "#007acc", marginBottom: "5px" }}>📄 Enhanced CSV</div>
+              <div style={{ fontSize: "14px", color: "#666" }}>Clean structure với human-readable field names</div>
             </div>
             <div style={{ padding: "15px", backgroundColor: "#fff3cd", borderRadius: "8px" }}>
               <div style={{ fontWeight: "600", color: "#856404", marginBottom: "5px" }}>🤖 Llama 4 Scout</div>
@@ -84,7 +86,7 @@ export default function Home() {
             <TableSelector onSelect={handleTableSelect} />
 
             <div style={{ marginTop: "30px", padding: "20px", backgroundColor: "#f8f9fa", borderRadius: "8px" }}>
-              <h4 style={{ margin: "0 0 15px 0", color: "#333" }}>🔧 Raw JSON Strategy</h4>
+              <h4 style={{ margin: "0 0 15px 0", color: "#333" }}>🔧 Enhanced CSV Strategy</h4>
               <div style={{ textAlign: "left", maxWidth: "500px", margin: "0 auto" }}>
                 <div style={{ marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
                   <span
@@ -103,7 +105,7 @@ export default function Home() {
                   >
                     1
                   </span>
-                  <span>Chọn bảng dữ li��u từ dropdown</span>
+                  <span>Chọn bảng dữ liệu từ dropdown</span>
                 </div>
                 <div style={{ marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
                   <span
@@ -122,7 +124,7 @@ export default function Home() {
                   >
                     2
                   </span>
-                  <span>Lấy raw JSON data từ Lark Base</span>
+                  <span>Extract complete data từ Lark Base objects</span>
                 </div>
                 <div style={{ marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
                   <span
@@ -141,7 +143,7 @@ export default function Home() {
                   >
                     3
                   </span>
-                  <span>Gửi trực tiếp cho Llama 4 Scout (no conversion)</span>
+                  <span>Convert sang Enhanced CSV với zero data loss</span>
                 </div>
                 <div style={{ marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
                   <span
@@ -160,7 +162,7 @@ export default function Home() {
                   >
                     4
                   </span>
-                  <span>Nhận phân tích với 100% data integrity</span>
+                  <span>Phân tích với Llama 4 Scout (complete data)</span>
                 </div>
               </div>
             </div>

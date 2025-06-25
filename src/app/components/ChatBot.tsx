@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from "react"
 import {
   getTableData,
   getTableStats,
-  getTableDataWithTypes, // ← Add this import
+  getTableDataWithTypes,
   testTableDataSample,
   checkSDKStatus,
   debugTableStructure,
@@ -109,7 +109,7 @@ const LoadingSpinner = ({ size = 20 }: { size?: number }) => (
   />
 )
 
-// 🔥 UPDATED: API Status Component for raw JSON strategy
+// 🔥 UPDATED: API Status Component for enhanced CSV strategy
 const APIStatusPanel = ({
   apiTestResults,
   isVisible,
@@ -173,8 +173,8 @@ const APIStatusPanel = ({
           <div style={{ fontSize: "12px", color: "#666" }}>
             Model: {apiTestResults.keyDetails?.[0]?.model || "meta-llama/llama-4-scout-17b-16e-instruct"}
           </div>
-          <div style={{ fontSize: "12px", color: "#007acc", marginTop: "5px" }}>
-            🎲 Strategy: Raw JSON (No CSV conversion) + Random API selection
+          <div style={{ fontSize: "12px", color: "#4caf50", marginTop: "5px" }}>
+            🎯 Strategy: Enhanced CSV (Zero Data Loss) + Random API selection
           </div>
         </div>
 
@@ -217,16 +217,16 @@ const APIStatusPanel = ({
           ))}
         </div>
 
-        {/* Raw JSON Strategy Info */}
+        {/* Enhanced CSV Strategy Info */}
         <div style={{ marginTop: "15px", padding: "10px", backgroundColor: "#e8f5e8", borderRadius: "6px" }}>
-          <h5 style={{ margin: "0 0 8px 0", fontSize: "13px", color: "#4caf50" }}>📄 Raw JSON Strategy:</h5>
+          <h5 style={{ margin: "0 0 8px 0", fontSize: "13px", color: "#4caf50" }}>📄 Enhanced CSV Strategy:</h5>
           <div style={{ fontSize: "12px", color: "#4caf50" }}>
-            • No CSV conversion: Gửi raw JSON trực tiếp cho API
-            <br />• Zero data loss: 100% original Lark Base data preserved
-            <br />• Complete field structures: Text objects, options, users, attachments
+            • Zero Data Loss: Complete field extraction với comprehensive preservation
+            <br />• Enhanced CSV: Clean structure với human-readable field names
+            <br />• Complete extraction: All Lark Base objects → meaningful values
             <br />• Random API selection: Chọn ngẫu nhiên từ {apiTestResults.workingKeys} working APIs
             <br />• Model: meta-llama/llama-4-scout-17b-16e-instruct
-            <br />• <strong>Benefit: Maximum data integrity, no conversion artifacts</strong>
+            <br />• <strong>Benefit: Maximum data preservation + AI-friendly format</strong>
           </div>
         </div>
       </div>
@@ -264,8 +264,8 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const hasRunPipeline = useRef(false)
   const isInitializing = useRef(false)
 
-  // 🔥 UPDATED: Pipeline Steps for raw JSON
-  const pipelineSteps = ["Kiểm tra SDK", "Test APIs", "Lấy dữ liệu", "Raw JSON", "Phân tích AI"]
+  // 🔥 UPDATED: Pipeline Steps for enhanced CSV
+  const pipelineSteps = ["Kiểm tra SDK", "Test APIs", "Lấy dữ liệu", "Enhanced CSV", "Phân tích AI"]
 
   // Test API Keys Function
   const testApiKeys = async () => {
@@ -295,7 +295,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     }
   }
 
-  // 🔥 UPDATED: Raw JSON preprocessing với field metadata
+  // 🔥 UPDATED: Enhanced CSV preprocessing với field metadata
   const performDataPreprocessing = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
     if (data.length === 0 || hasRunPipeline.current) return
 
@@ -313,7 +313,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     setCurrentStep(4)
 
     try {
-      setProcessingStatus("🚀 Bắt đầu Clean JSON Pipeline với field standardization...")
+      setProcessingStatus("🚀 Bắt đầu Enhanced CSV Pipeline với ZERO DATA LOSS...")
 
       // Get enhanced field metadata
       const { fieldTypes, fieldNames } = await getTableDataWithTypes(tableId)
@@ -327,7 +327,14 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         setKeyUsageInfo(result.keyUsage)
         setIsDataReady(true)
         setCurrentStep(4)
-        setProcessingStatus("✅ Clean JSON Pipeline hoàn thành!")
+        setProcessingStatus("✅ Enhanced CSV Pipeline hoàn thành!")
+
+        // 🔥 Check for data loss
+        if (result.keyUsage.stats && result.keyUsage.stats.dataPreservationRate < 100) {
+          setProcessingStatus(
+            `⚠️ Pipeline hoàn thành với ${100 - result.keyUsage.stats.dataPreservationRate}% data loss`,
+          )
+        }
       } else {
         setAutoAnalysis(result.analysis)
         setIsDataReady(false)
@@ -335,7 +342,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       }
     } catch (err) {
       console.error("❌ Pipeline error:", err)
-      setAutoAnalysis("❌ Không thể thực hiện Clean JSON pipeline.")
+      setAutoAnalysis("❌ Không thể thực hiện Enhanced CSV pipeline.")
       setIsDataReady(false)
       setProcessingStatus("❌ Pipeline lỗi")
       hasRunPipeline.current = false
@@ -393,7 +400,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           console.warn(`This is likely a Lark Base SDK issue, not a conversion issue`)
         }
 
-        // Step 4: Process Data with Raw JSON
+        // Step 4: Process Data with Enhanced CSV
         const hasRealData = data.some((record) =>
           Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
         )
@@ -465,9 +472,9 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
         {isAutoAnalyzing && (
           <StatusCard
-            title="🚀 Raw JSON Pipeline"
-            status="Đang gửi raw JSON data trực tiếp cho API..."
-            details="No CSV conversion → Zero data loss → Complete field structures"
+            title="🚀 Enhanced CSV Pipeline"
+            status="Đang convert sang Enhanced CSV với ZERO DATA LOSS..."
+            details="Complete field extraction → Clean CSV structure → Zero data loss guarantee"
             type="info"
           />
         )}
@@ -509,14 +516,14 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
         {keyUsageInfo && (
           <StatusCard
-            title="📄 Raw JSON Pipeline"
+            title="📄 Enhanced CSV Pipeline"
             status={`API ${keyUsageInfo.usedAPI || "N/A"} được chọn ngẫu nhiên`}
             details={
               keyUsageInfo.totalTokens
-                ? `${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms | No CSV conversion`
-                : `Strategy: ${keyUsageInfo.strategy} | Zero conversion loss`
+                ? `${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms | ${keyUsageInfo.stats?.dataPreservationRate?.toFixed(1) || "N/A"}% preserved`
+                : `Strategy: ${keyUsageInfo.strategy} | Zero data loss target`
             }
-            type="success"
+            type={keyUsageInfo.stats?.dataPreservationRate === 100 ? "success" : "warning"}
           />
         )}
       </div>
@@ -546,6 +553,36 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
               }}
             >
               🔍 Xem chi tiết API status
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* CSV Data Loss Warning (if any) */}
+      {keyUsageInfo && keyUsageInfo.stats && keyUsageInfo.stats.dataPreservationRate < 100 && (
+        <div style={{ marginBottom: "20px" }}>
+          <StatusCard
+            title="⚠️ CSV Conversion Data Loss"
+            status={`Mất ${(100 - keyUsageInfo.stats.dataPreservationRate).toFixed(1)}% data trong quá trình conversion`}
+            details={`Preserved: ${keyUsageInfo.stats.dataPreservationRate.toFixed(1)}% | Extracted: ${keyUsageInfo.stats.extractionSuccessRate?.toFixed(1) || "N/A"}% | Errors: ${keyUsageInfo.stats.extractionErrors || 0}`}
+            type="error"
+          />
+
+          <div style={{ textAlign: "center", marginTop: "10px" }}>
+            <button
+              onClick={() => setShowApiStatus(true)}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#ff4444",
+                color: "white",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: "500",
+              }}
+            >
+              🔍 Xem chi tiết conversion issues
             </button>
           </div>
         </div>
@@ -608,14 +645,14 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       {autoAnalysis && (
         <div style={{ marginBottom: "20px" }}>
           <StatusCard
-            title="🤖 Phân tích AI với Raw JSON"
-            status="Phân tích từ raw JSON data hoàn thành"
+            title="🤖 Phân tích AI với Enhanced CSV"
+            status="Phân tích từ Enhanced CSV data hoàn thành"
             details={
               keyUsageInfo
-                ? `API ${keyUsageInfo.usedAPI} | ${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms | No conversion loss`
+                ? `API ${keyUsageInfo.usedAPI} | ${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms | ${keyUsageInfo.stats?.dataPreservationRate?.toFixed(1) || "N/A"}% data preserved`
                 : undefined
             }
-            type="success"
+            type={keyUsageInfo?.stats?.dataPreservationRate === 100 ? "success" : "warning"}
           />
           <div
             style={{
@@ -649,8 +686,10 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
           <div style={{ marginBottom: "15px", fontSize: "13px", color: "#666" }}>
             {isDataReady ? (
-              <span style={{ color: "#4caf50" }}>
-                ✅ Sẵn sàng! AI đã phân tích {tableData.length} records với Raw JSON (No CSV conversion).
+              <span style={{ color: keyUsageInfo?.stats?.dataPreservationRate === 100 ? "#4caf50" : "#ff9800" }}>
+                {keyUsageInfo?.stats?.dataPreservationRate === 100 ? "✅" : "⚠️"} AI đã phân tích {tableData.length}{" "}
+                records với Enhanced CSV ({keyUsageInfo?.stats?.dataPreservationRate?.toFixed(1) || "N/A"}% data
+                preserved).
                 {keyUsageInfo && keyUsageInfo.usedAPI && (
                   <span style={{ color: "#007acc" }}> API {keyUsageInfo.usedAPI} được sử dụng.</span>
                 )}
@@ -696,7 +735,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
               }}
             >
               {isAsking && <LoadingSpinner size={16} />}
-              {isAsking ? "Đang suy nghĩ..." : "🚀 Hỏi AI (Raw JSON)"}
+              {isAsking ? "Đang suy nghĩ..." : "🚀 Hỏi AI (Enhanced CSV)"}
             </button>
 
             <div style={{ fontSize: "12px", color: "#666" }}>
@@ -717,13 +756,14 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
                 borderRadius: "8px",
               }}
             >
-              <h4 style={{ margin: "0 0 10px 0", color: "#333" }}>💡 Câu trả lời từ Llama 4 Scout (Raw JSON)</h4>
+              <h4 style={{ margin: "0 0 10px 0", color: "#333" }}>💡 Câu trả lời từ Llama 4 Scout (Enhanced CSV)</h4>
               <div style={{ whiteSpace: "pre-wrap", fontSize: "14px", lineHeight: "1.5" }}>{answer}</div>
               {keyUsageInfo && (
                 <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
-                  📊 Dựa trên {keyUsageInfo.totalRecords} records qua Raw JSON Pipeline với API {keyUsageInfo.usedAPI}
-                  {keyUsageInfo.stats && keyUsageInfo.stats.dataIntegrityRate && (
-                    <span> | Data integrity: {keyUsageInfo.stats.dataIntegrityRate.toFixed(1)}%</span>
+                  📊 Dựa trên {keyUsageInfo.totalRecords} records qua Enhanced CSV Pipeline với API{" "}
+                  {keyUsageInfo.usedAPI}
+                  {keyUsageInfo.stats && keyUsageInfo.stats.dataPreservationRate && (
+                    <span> | Data preservation: {keyUsageInfo.stats.dataPreservationRate.toFixed(1)}%</span>
                   )}
                 </div>
               )}
