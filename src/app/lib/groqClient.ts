@@ -27,7 +27,7 @@ const testSingleChunk = async (chunk: any[], keyIndex: number): Promise<boolean>
 
     console.log(`🧪 Test chunk: ${chunk.length} records, ~${estimatedTokens} tokens`)
 
-    if (estimatedTokens > 30000) {
+    if (estimatedTokens > 15000) {
       console.log(`⚠️ Chunk quá lớn (${estimatedTokens} tokens), cần chia nhỏ hơn`)
       return false
     }
@@ -57,7 +57,7 @@ const testSingleChunk = async (chunk: any[], keyIndex: number): Promise<boolean>
 }
 
 // Function chia dữ liệu theo token limit
-const chunkDataByTokens = (data: any[], maxTokensPerChunk = 10000): any[][] => {
+const chunkDataByTokens = (data: any[], maxTokensPerChunk = 5000): any[][] => {
   const chunks: any[][] = []
   let currentChunk: any[] = []
   let currentTokens = 0
@@ -101,7 +101,7 @@ const chunkDataByTokens = (data: any[], maxTokensPerChunk = 10000): any[][] => {
   // Nếu chỉ có 1 chunk và quá lớn, thử chia nhỏ hơn
   if (chunks.length === 1) {
     const singleChunkTokens = estimateTokens(JSON.stringify(chunks[0], null, 1))
-    if (singleChunkTokens > 15000) {
+    if (singleChunkTokens > 10000) {
       console.log(`⚠️ Single chunk quá lớn (${singleChunkTokens} tokens), thử chia nhỏ hơn...`)
       return chunkDataByTokens(data, Math.floor(maxTokensPerChunk / 2)) // Chia đôi
     }
@@ -205,7 +205,7 @@ Return optimized JSON only:`
             },
           ],
           temperature: 0.1,
-          max_tokens: 15000, // Giảm xuống để an toàn
+          max_tokens: 8000, // Giảm từ 15000 xuống 8000
         }),
         new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 60s")), 60000)),
       ])) as any
@@ -271,23 +271,23 @@ export const preprocessDataWithPipeline = async (
     }
 
     // BƯỚC 1: Chia dữ liệu thành chunks theo token limit
-    console.log(`📊 BƯỚC 1: Chia dữ liệu theo token limit (10000 tokens/chunk)`)
-    let chunks = chunkDataByTokens(data, 10000)
+    console.log(`📊 BƯỚC 1: Chia dữ liệu theo token limit (5000 tokens/chunk)`)
+    let chunks = chunkDataByTokens(data, 5000)
 
     // Nếu vẫn chỉ có 1 chunk lớn, thử strategy khác
     if (chunks.length === 1) {
       const singleChunkTokens = estimateTokens(JSON.stringify(chunks[0], null, 1))
       console.log(`⚠️ Chỉ có 1 chunk với ${singleChunkTokens} tokens`)
 
-      if (singleChunkTokens > 20000) {
+      if (singleChunkTokens > 10000) {
         console.log(`🔄 Fallback: Chia theo số records thay vì tokens`)
-        // Chia theo số records
-        const recordsPerChunk = Math.ceil(data.length / Math.max(API_KEYS.length - 1, 2))
+        // Chia theo số records với chunks nhỏ hơn
+        const recordsPerChunk = Math.max(Math.ceil(data.length / (API_KEYS.length - 1)), 3) // Tối thiểu 3 records/chunk
         chunks = []
         for (let i = 0; i < data.length; i += recordsPerChunk) {
           chunks.push(data.slice(i, i + recordsPerChunk))
         }
-        console.log(`📊 Fallback result: ${chunks.length} chunks với ${recordsPerChunk} records/chunk`)
+        console.log(`📊 Fallback result: ${chunks.length} chunks với ~${recordsPerChunk} records/chunk`)
       }
     }
 
