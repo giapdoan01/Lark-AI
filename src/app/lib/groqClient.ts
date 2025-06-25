@@ -10,7 +10,9 @@ const API_KEYS = [
 ].filter((key) => key && !key.includes("account") && key.startsWith("gsk_"))
 
 const AVAILABLE_MODELS = [
-  "meta-llama/llama-guard-4-12b", // Chỉ dùng model này
+  "llama-3.1-70b-versatile", // Model có token limit cao hơn
+  "llama-3.1-8b-instant", // Backup model
+  "mixtral-8x7b-32768", // Backup model với context window lớn
 ]
 
 // Function ước tính số tokens (1 token ≈ 4 characters)
@@ -141,7 +143,7 @@ const calculateTokenDistribution = (
   console.log(`⚡ Model: meta-llama/llama-guard-4-12b`)
 
   // Chia data thành 4 phần dựa trên record count (vì CSV format đồng nhất hơn)
-  const recordsPerAPI = Math.ceil(data.length / 4)
+  const recordsPerAPI = Math.min(Math.ceil(data.length / 4), 10) // Giới hạn tối đa 10 records per API
   const chunks: any[][] = []
   const chunksPerAPI: number[] = []
 
@@ -198,7 +200,7 @@ const testSingleChunkCSV = async (chunk: any[], keyIndex: number): Promise<boole
 
     // Test với prompt đơn giản
     const testCompletion = await groq.chat.completions.create({
-      model: "meta-llama/llama-guard-4-12b",
+      model: "llama-3.1-70b-versatile", // Đổi model
       messages: [
         {
           role: "user",
@@ -239,7 +241,7 @@ const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: st
     const startTime = Date.now()
     const completion = (await Promise.race([
       groq.chat.completions.create({
-        model: "meta-llama/llama-guard-4-12b",
+        model: "llama-3.1-70b-versatile", // Đổi model
         messages: [
           {
             role: "user",
@@ -247,7 +249,7 @@ const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: st
           },
         ],
         temperature: 0.7,
-        max_tokens: 25000,
+        max_tokens: 1024, // Giảm từ 25000 xuống 1024
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 90s")), 90000)),
     ])) as any
@@ -327,11 +329,11 @@ const optimizeDataChunk = async (
     const groq = createGroqClient(apiKey)
 
     // 🔥 UPDATED: Prompt cho CSV optimization
-    const optimizePrompt = `Optimize this CSV data - remove empty rows, clean null values, maintain CSV format:
+    const optimizePrompt = `Clean this CSV data, remove empty rows, keep format:
 
 ${csvContent}
 
-Return clean, optimized CSV only (keep headers):`
+Return clean CSV only:`
 
     const promptTokens = estimateTokens(optimizePrompt)
     console.log(`📤 SENDING CSV REQUEST:`)
@@ -343,10 +345,10 @@ Return clean, optimized CSV only (keep headers):`
       const startTime = Date.now()
       const completion = (await Promise.race([
         groq.chat.completions.create({
-          model: "meta-llama/llama-guard-4-12b",
+          model: "llama-3.1-70b-versatile", // Đổi model
           messages: [{ role: "user", content: optimizePrompt }],
           temperature: 0.1,
-          max_tokens: 8000,
+          max_tokens: 1024, // Giảm từ 8000 xuống 1024
         }),
         new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 60s")), 60000)),
       ])) as any
@@ -406,6 +408,17 @@ Return clean, optimized CSV only (keep headers):`
         console.log(`  🔍 Unknown error for API ${keyIndex + 1}`)
       }
 
+      // Thêm specific error handling cho token limits
+      if (errorMsg.includes("max_tokens")) {
+        console.log(`  🎯 Token limit exceeded - model chỉ hỗ trợ max_tokens ≤ 1024`)
+        return {
+          success: false,
+          optimizedData: "",
+          keyIndex: keyIndex,
+          error: "Model token limit exceeded (max 1024 tokens)",
+        }
+      }
+
       throw new Error(errorMsg)
     }
   } catch (error) {
@@ -439,7 +452,7 @@ const debugOptimizeProcess = async (chunk: any[], keyIndex: number): Promise<voi
 
     console.log(`🧪 Testing CSV API ${keyIndex + 1} với simple request...`)
     const testResult = await groq.chat.completions.create({
-      model: "meta-llama/llama-guard-4-12b",
+      model: "llama-3.1-70b-versatile", // Đổi model
       messages: [{ role: "user", content: "Say 'CSV test ok'" }],
       temperature: 0.1,
       max_tokens: 10,
@@ -590,7 +603,36 @@ export const preprocessDataWithPipeline = async (
     if (successfulOptimizes.length === 0) {
       console.log(`🔄 CSV FALLBACK: Tất cả optimize thất bại, sử dụng raw CSV data`)
 
-      const rawCSV = convertToCSV(data.slice(0, 50)) // Lấy 50 records đầu
+      // Sử dụng toàn bộ data thay vì chỉ 50 records
+      const rawCSV = convertToCSV(data) // Sử dụng tất cả data
+
+      // Nếu CSV quá lớn, chia nhỏ
+      if (estimateTokens(rawCSV) > 3000) {
+        const smallerCSV = convertToCSV(data.slice(0, Math.min(30, data.length)))
+        console.log(`📊 CSV quá lớn, sử dụng ${Math.min(30, data.length)} records`)
+
+        const keyUsage = {
+          totalKeys: API_KEYS.length,
+          optimizeKeys: 0,
+          analysisKey: 1,
+          failedKeys: 4,
+          successRate: "0%",
+          chunks: tokenDistribution.distribution.length,
+          successfulChunks: 0,
+          finalDataSize: smallerCSV.length,
+          fallback: true,
+          tokenDistribution: tokenDistribution,
+          format: "CSV",
+          compressionRatio: tokenDistribution.compressionRatio,
+        }
+
+        return {
+          success: true,
+          optimizedData: smallerCSV,
+          analysis: `⚠️ Sử dụng ${Math.min(30, data.length)} records đầu tiên từ tổng ${data.length} records trong CSV format do giới hạn token.`,
+          keyUsage: keyUsage,
+        }
+      }
 
       const keyUsage = {
         totalKeys: API_KEYS.length,
@@ -795,7 +837,7 @@ export const testAllApiKeys = async (): Promise<{
       const groq = createGroqClient(apiKey)
 
       const testCompletion = await groq.chat.completions.create({
-        model: "meta-llama/llama-guard-4-12b",
+        model: "llama-3.1-70b-versatile",
         messages: [
           {
             role: "user",
