@@ -10,9 +10,8 @@ const API_KEYS = [
 ].filter((key) => key && !key.includes("account") && key.startsWith("gsk_"))
 
 const AVAILABLE_MODELS = [
-  "llama-3.1-70b-versatile", // Model có token limit cao hơn
-  "llama-3.1-8b-instant", // Backup model
-  "mixtral-8x7b-32768", // Backup model với context window lớn
+  "compound-beta", // Primary model với unlimited tokens
+  "compound-beta-mini", // Backup model với unlimited tokens
 ]
 
 // Function ước tính số tokens (1 token ≈ 4 characters)
@@ -140,7 +139,7 @@ const calculateTokenDistribution = (
   console.log(`📄 CSV size: ${csvContent.length} chars (${csvTokens} tokens)`)
   console.log(`📉 CSV Compression: ${compressionRatio}% (${100 - compressionRatio}% token reduction)`)
   console.log(`📊 Tokens per API (4 APIs): ${tokensPerAPI}`)
-  console.log(`⚡ Model: meta-llama/llama-guard-4-12b`)
+  console.log(`⚡ Model: compound-beta`)
 
   // Chia data thành 4 phần dựa trên record count (vì CSV format đồng nhất hơn)
   const recordsPerAPI = Math.min(Math.ceil(data.length / 4), 10) // Giới hạn tối đa 10 records per API
@@ -200,7 +199,7 @@ const testSingleChunkCSV = async (chunk: any[], keyIndex: number): Promise<boole
 
     // Test với prompt đơn giản
     const testCompletion = await groq.chat.completions.create({
-      model: "llama-3.1-70b-versatile", // Đổi model
+      model: "compound-beta", // Thay vì "llama-3.1-70b-versatile"
       messages: [
         {
           role: "user",
@@ -233,7 +232,7 @@ const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: st
     const promptTokens = estimateTokens(prompt)
     console.log(`🤖 FINAL ANALYSIS với API 5 (Key ${keyIndex + 1}):`)
     console.log(`  🎯 Analysis INPUT tokens: ${promptTokens}`)
-    console.log(`  ⚡ Model: meta-llama/llama-guard-4-12b`)
+    console.log(`  ⚡ Model: compound-beta (unlimited tokens)`)
     console.log(`  📊 Format: CSV`)
 
     const groq = createGroqClient(apiKey)
@@ -241,7 +240,7 @@ const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: st
     const startTime = Date.now()
     const completion = (await Promise.race([
       groq.chat.completions.create({
-        model: "llama-3.1-70b-versatile", // Đổi model
+        model: "compound-beta", // Thay vì "llama-3.1-70b-versatile"
         messages: [
           {
             role: "user",
@@ -249,7 +248,7 @@ const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: st
           },
         ],
         temperature: 0.7,
-        max_tokens: 1024, // Giảm từ 25000 xuống 1024
+        max_tokens: 4000, // Tăng lên vì compound-beta có thể handle nhiều tokens hơn
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 90s")), 90000)),
     ])) as any
@@ -257,7 +256,7 @@ const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: st
     const responseTime = Date.now() - startTime
 
     if (!completion?.choices?.[0]?.message?.content) {
-      console.log(`⚠️ No response content from meta-llama/llama-guard-4-12b`)
+      console.log(`⚠️ No response content from compound-beta`)
       throw new Error("No response content")
     }
 
@@ -272,8 +271,8 @@ const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: st
     return analysis
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error)
-    console.error(`❌ CSV Analysis failed with meta-llama/llama-guard-4-12b: ${errorMsg}`)
-    return `❌ Không thể phân tích CSV với meta-llama/llama-guard-4-12b: ${errorMsg}`
+    console.error(`❌ CSV Analysis failed with compound-beta: ${errorMsg}`)
+    return `❌ Không thể phân tích CSV với compound-beta: ${errorMsg}`
   }
 }
 
@@ -338,17 +337,17 @@ Return clean CSV only:`
     const promptTokens = estimateTokens(optimizePrompt)
     console.log(`📤 SENDING CSV REQUEST:`)
     console.log(`  🎯 Total INPUT tokens: ${promptTokens} (prompt + CSV data)`)
-    console.log(`  ⚡ Model: meta-llama/llama-guard-4-12b`)
+    console.log(`  ⚡ Model: compound-beta (unlimited tokens)`)
     console.log(`  🔄 Max output tokens: 8000`)
 
     try {
       const startTime = Date.now()
       const completion = (await Promise.race([
         groq.chat.completions.create({
-          model: "llama-3.1-70b-versatile", // Đổi model
+          model: "compound-beta", // Thay vì "llama-3.1-70b-versatile"
           messages: [{ role: "user", content: optimizePrompt }],
           temperature: 0.1,
-          max_tokens: 1024, // Giảm từ 8000 xuống 1024
+          max_tokens: 2000, // Tăng lên cho compound-beta
         }),
         new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 60s")), 60000)),
       ])) as any
@@ -452,7 +451,7 @@ const debugOptimizeProcess = async (chunk: any[], keyIndex: number): Promise<voi
 
     console.log(`🧪 Testing CSV API ${keyIndex + 1} với simple request...`)
     const testResult = await groq.chat.completions.create({
-      model: "llama-3.1-70b-versatile", // Đổi model
+      model: "compound-beta", // Thay vì "llama-3.1-70b-versatile"
       messages: [{ role: "user", content: "Say 'CSV test ok'" }],
       temperature: 0.1,
       max_tokens: 10,
@@ -837,7 +836,7 @@ export const testAllApiKeys = async (): Promise<{
       const groq = createGroqClient(apiKey)
 
       const testCompletion = await groq.chat.completions.create({
-        model: "llama-3.1-70b-versatile",
+        model: "compound-beta",
         messages: [
           {
             role: "user",
@@ -900,7 +899,7 @@ export const testGroqAPI = async () => {
   return {
     success: result.success,
     message: result.message,
-    workingModel: "meta-llama/llama-guard-4-12b",
+    workingModel: "compound-beta", // Thay vì "meta-llama/llama-guard-4-12b"
     format: "CSV",
   }
 }
