@@ -123,7 +123,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [isDataReady, setIsDataReady] = useState<boolean>(false)
   const [optimizedData, setOptimizedData] = useState<string>("")
 
-  // 🎨 NEW: UI States
+  // 🎨 UI States
   const [currentStep, setCurrentStep] = useState(0)
   const [processingStatus, setProcessingStatus] = useState<string>("")
   const [showDebugTools, setShowDebugTools] = useState(false)
@@ -134,7 +134,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const isInitializing = useRef(false)
 
   // 🎨 Pipeline Steps
-  const pipelineSteps = ["Kiểm tra SDK", "Lấy dữ liệu", "Chuyển CSV", "Xử lý AI", "Hoàn thành"]
+  const pipelineSteps = ["Kiểm tra SDK", "Lấy dữ liệu", "Chia đều chunks", "Thống kê AI", "Phân tích tổng hợp"]
 
   // 🔧 Optimized Functions
   const performDataPreprocessing = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
@@ -151,10 +151,10 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
     hasRunPipeline.current = true
     setIsAutoAnalyzing(true)
-    setCurrentStep(3)
+    setCurrentStep(2)
 
     try {
-      setProcessingStatus("🚀 Bắt đầu CSV Pipeline...")
+      setProcessingStatus("🚀 Bắt đầu Equal Distribution Pipeline...")
 
       const result = await preprocessDataWithPipeline(data, tableName)
 
@@ -172,7 +172,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       }
     } catch (err) {
       console.error("❌ Pipeline error:", err)
-      setAutoAnalysis("❌ Không thể thực hiện CSV pipeline.")
+      setAutoAnalysis("❌ Không thể thực hiện Equal Distribution pipeline.")
       setIsDataReady(false)
       setProcessingStatus("❌ Pipeline lỗi")
       hasRunPipeline.current = false
@@ -206,15 +206,22 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         const stats = await getTableStats(tableId)
         setTableStats(stats)
 
-        setProcessingStatus(`📥 Lấy ${stats.totalRecords} records...`)
+        setProcessingStatus(`📥 Lấy TẤT CẢ ${stats.totalRecords} records...`)
         const data = await getTableData(tableId)
         setTableData(data)
         hasLoadedData.current = true
         setCurrentStep(2)
 
+        console.log(`✅ Loaded ${data.length} records from table (expected: ${stats.totalRecords})`)
+
         if (data.length === 0) {
           setError("Bảng không có dữ liệu.")
           return
+        }
+
+        // 🔥 IMPORTANT: Validation - check for data loss
+        if (data.length !== stats.totalRecords) {
+          console.warn(`⚠️ POTENTIAL DATA LOSS: Expected ${stats.totalRecords}, got ${data.length} records`)
         }
 
         // Step 3: Process Data
@@ -280,9 +287,9 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
         {isAutoAnalyzing && (
           <StatusCard
-            title="🚀 CSV Data Pipeline"
-            status="Đang optimize dữ liệu với AI..."
-            details="Chia chunks → Xử lý song song → Gộp kết quả → Phân tích"
+            title="🚀 Equal Distribution Pipeline"
+            status="Đang chia đều records cho các APIs và thống kê..."
+            details="Chia đều → Thống kê song song → Gộp kết quả → Phân tích tổng hợp"
             type="info"
           />
         )}
@@ -305,19 +312,34 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           <StatusCard
             title="📊 Thống kê bảng"
             status={`${tableStats.totalRecords} records, ${tableStats.totalFields} fields`}
-            type="success"
+            details={`Loaded: ${tableData.length} records`}
+            type={tableData.length === tableStats.totalRecords ? "success" : "warning"}
           />
         )}
 
         {keyUsageInfo && (
           <StatusCard
-            title="🔧 CSV Pipeline"
+            title="🔧 Equal Distribution Pipeline"
             status={`${keyUsageInfo.processedChunks || 0} chunks processed`}
-            details={`Format: ${keyUsageInfo.format} | Model: ${keyUsageInfo.model}`}
-            type="success"
+            details={
+              keyUsageInfo.dataLoss
+                ? `⚠️ Data loss: ${keyUsageInfo.dataLoss} records | Strategy: ${keyUsageInfo.strategy}`
+                : `✅ No data loss | Strategy: ${keyUsageInfo.strategy}`
+            }
+            type={keyUsageInfo.dataLoss > 0 ? "warning" : "success"}
           />
         )}
       </div>
+
+      {/* Data Loss Warning */}
+      {keyUsageInfo && keyUsageInfo.dataLoss > 0 && (
+        <StatusCard
+          title="⚠️ Cảnh báo mất dữ liệu"
+          status={`Mất ${keyUsageInfo.dataLoss} records trong quá trình xử lý`}
+          details={`Expected: ${keyUsageInfo.totalRecords}, Processed: ${keyUsageInfo.processedRecords}`}
+          type="warning"
+        />
+      )}
 
       {/* Error State */}
       {error && (
@@ -369,59 +391,19 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         </div>
       )}
 
-      {/* CSV Preview */}
-      {optimizedData && (
+      {/* Analysis Results */}
+      {autoAnalysis && (
         <div style={{ marginBottom: "20px" }}>
           <StatusCard
-            title="📄 CSV Data Preview"
-            status={`${optimizedData.length} characters | ${optimizedData.split("\n").length - 1} data rows`}
+            title="🤖 Phân tích tổng hợp AI"
+            status="Phân tích từ tất cả chunks hoàn thành"
             details={
-              keyUsageInfo?.csvCompressionVsJson
-                ? `Tiết kiệm ${100 - Number.parseInt(keyUsageInfo.csvCompressionVsJson)}% tokens vs JSON`
+              keyUsageInfo
+                ? `${keyUsageInfo.processedRecords}/${keyUsageInfo.totalRecords} records được phân tích`
                 : undefined
             }
             type="success"
           />
-
-          <details style={{ marginTop: "10px" }}>
-            <summary
-              style={{
-                cursor: "pointer",
-                padding: "10px",
-                backgroundColor: "#f8f9fa",
-                borderRadius: "6px",
-                border: "1px solid #dee2e6",
-                fontSize: "14px",
-                fontWeight: "500",
-              }}
-            >
-              📋 Xem CSV data (click để mở/đóng)
-            </summary>
-            <pre
-              style={{
-                marginTop: "10px",
-                padding: "15px",
-                backgroundColor: "white",
-                border: "1px solid #dee2e6",
-                borderRadius: "6px",
-                fontSize: "11px",
-                fontFamily: "monospace",
-                maxHeight: "300px",
-                overflow: "auto",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {optimizedData.split("\n").slice(0, 15).join("\n")}
-              {optimizedData.split("\n").length > 15 && `\n\n... và ${optimizedData.split("\n").length - 15} dòng khác`}
-            </pre>
-          </details>
-        </div>
-      )}
-
-      {/* Analysis Results */}
-      {autoAnalysis && (
-        <div style={{ marginBottom: "20px" }}>
-          <StatusCard title="🤖 Phân tích AI" status="Phân tích dữ liệu hoàn thành" type="success" />
           <div
             style={{
               marginTop: "10px",
@@ -455,7 +437,10 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           <div style={{ marginBottom: "15px", fontSize: "13px", color: "#666" }}>
             {isDataReady ? (
               <span style={{ color: "#4caf50" }}>
-                ✅ Sẵn sàng! AI đã nhận {tableData.length} records trong CSV format.
+                ✅ Sẵn sàng! AI đã phân tích {tableData.length} records qua Equal Distribution Pipeline.
+                {keyUsageInfo && keyUsageInfo.dataLoss > 0 && (
+                  <span style={{ color: "#ff9800" }}> (⚠️ Mất {keyUsageInfo.dataLoss} records trong xử lý)</span>
+                )}
               </span>
             ) : (
               <span style={{ color: "#ff9800" }}>⏳ Đang xử lý {tableData.length} records...</span>
@@ -502,7 +487,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
             </button>
 
             <div style={{ fontSize: "12px", color: "#666" }}>
-              {optimizedData && `${estimateTokens(optimizedData)} tokens`}
+              {keyUsageInfo && `${keyUsageInfo.processedRecords}/${keyUsageInfo.totalRecords} records`}
             </div>
           </div>
 
@@ -519,6 +504,12 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
             >
               <h4 style={{ margin: "0 0 10px 0", color: "#333" }}>💡 Câu trả lời từ AI</h4>
               <div style={{ whiteSpace: "pre-wrap", fontSize: "14px", lineHeight: "1.5" }}>{answer}</div>
+              {keyUsageInfo && (
+                <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
+                  📊 Dựa trên {keyUsageInfo.processedRecords}/{keyUsageInfo.totalRecords} records qua Equal Distribution
+                  Pipeline
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -527,15 +518,14 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       {/* Add CSS for spinner animation */}
       <style jsx>{`
         @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
+          0% {
+            transform: rotate(0deg);
+          }
+          100% {
+            transform: rotate(360deg);
+          }
         }
       `}</style>
     </div>
   )
-}
-
-// Helper function for token estimation
-const estimateTokens = (text: string): number => {
-  return Math.ceil(text.length / 4)
 }
