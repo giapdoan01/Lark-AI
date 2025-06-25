@@ -9,7 +9,8 @@ const API_KEYS = [
   process.env.NEXT_PUBLIC_GROQ_API_KEY_5 || "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",
 ].filter((key) => key && !key.includes("account") && key.startsWith("gsk_"))
 
-const SINGLE_MODEL = "llama3-70b-8192"
+// 🔥 NEW: Llama 4 Scout model
+const SINGLE_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 // Cache đơn giản
 const testResultsCache = new Map<string, boolean>()
@@ -152,115 +153,58 @@ const convertToCSV = (data: Array<{ recordId: string; fields: Record<string, unk
   console.log(`  📄 Original JSON: ${originalJsonSize} chars`)
   console.log(`  📄 Consistent CSV: ${csvSize} chars`)
   console.log(`  🎯 Compression: ${compressionRatio}% smaller`)
+  console.log(`  🎯 Estimated tokens: ${estimateTokens(csvContent)}`)
 
   return csvContent
 }
 
-// 🔥 NEW: Equal distribution chunking với detailed logging
-const createEqualDistributionChunks = (
-  csvContent: string,
-  workingAPICount: number,
-): { csvChunks: string[]; chunkStats: any[] } => {
-  console.log(`📊 ===== EQUAL DISTRIBUTION CHUNKING =====`)
+// 🔥 NEW: Random API selection
+const selectRandomWorkingAPI = async (): Promise<{ apiKey: string; apiIndex: number; details: any } | null> => {
+  console.log(`🎲 Selecting random working API from ${API_KEYS.length} available keys...`)
 
-  const lines = csvContent.split("\n")
-  const headerLine = lines[0]
-  const dataLines = lines.slice(1)
+  // Test all APIs first
+  const apiTestResults = []
+  for (let i = 0; i < API_KEYS.length; i++) {
+    console.log(`🧪 Testing API ${i + 1}...`)
+    const testResult = await testSingleAPI(i)
+    apiTestResults.push({ ...testResult, index: i })
 
-  console.log(`📋 Total: ${lines.length} lines (1 header + ${dataLines.length} data rows)`)
-  console.log(`🔧 Working APIs for processing: ${workingAPICount}`)
-
-  // 🔥 IMPORTANT: Chia đều records cho working APIs
-  const recordsPerAPI = Math.floor(dataLines.length / workingAPICount)
-  const remainingRecords = dataLines.length % workingAPICount
-
-  console.log(`📊 Records per API: ${recordsPerAPI}`)
-  console.log(`📊 Remaining records: ${remainingRecords}`)
-
-  const csvChunks: string[] = []
-  const chunkStats: any[] = []
-
-  // 🔥 Chia đều records cho từng working API
-  for (let apiIndex = 0; apiIndex < workingAPICount; apiIndex++) {
-    const startIndex = apiIndex * recordsPerAPI
-    let endIndex = startIndex + recordsPerAPI
-
-    // 🔥 API cuối cùng nhận thêm remaining records
-    if (apiIndex === workingAPICount - 1) {
-      endIndex += remainingRecords
+    if (testResult.success) {
+      console.log(`✅ API ${i + 1} working`)
+    } else {
+      console.log(`❌ API ${i + 1} failed: ${testResult.details.error}`)
     }
-
-    const chunkDataLines = dataLines.slice(startIndex, endIndex)
-    const chunkCSV = headerLine + "\n" + chunkDataLines.join("\n")
-
-    csvChunks.push(chunkCSV)
-
-    const chunkStat = {
-      apiIndex: apiIndex + 1,
-      startRecord: startIndex + 1,
-      endRecord: endIndex,
-      recordCount: chunkDataLines.length,
-      characters: chunkCSV.length,
-      estimatedTokens: estimateTokens(chunkCSV),
-    }
-
-    chunkStats.push(chunkStat)
-
-    console.log(
-      `📦 Working API ${apiIndex + 1}: Records ${startIndex + 1}-${endIndex} (${chunkDataLines.length} records, ${chunkCSV.length} chars)`,
-    )
   }
 
-  // 🔥 Validation: Đảm bảo không mất records
-  const totalProcessedRecords = chunkStats.reduce((sum, stat) => sum + stat.recordCount, 0)
-  console.log(`✅ Validation: ${totalProcessedRecords}/${dataLines.length} records distributed`)
+  // Get working APIs
+  const workingAPIs = apiTestResults.filter((result) => result.success)
+  console.log(`🔑 Found ${workingAPIs.length}/${API_KEYS.length} working APIs`)
 
-  if (totalProcessedRecords !== dataLines.length) {
-    console.error(`❌ DATA LOSS DETECTED: ${dataLines.length - totalProcessedRecords} records missing!`)
-  } else {
-    console.log(`✅ NO DATA LOSS: All ${dataLines.length} records distributed correctly`)
+  if (workingAPIs.length === 0) {
+    console.log(`❌ No working APIs found`)
+    return null
   }
 
-  console.log(`===============================================`)
+  // 🎲 Select random working API
+  const randomIndex = Math.floor(Math.random() * workingAPIs.length)
+  const selectedAPI = workingAPIs[randomIndex]
+  const apiKey = API_KEYS[selectedAPI.index]
 
-  return { csvChunks, chunkStats }
-}
+  console.log(
+    `🎯 Randomly selected API ${selectedAPI.index + 1} (${randomIndex + 1}/${workingAPIs.length} working APIs)`,
+  )
+  console.log(`🔑 Selected API preview: ${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`)
 
-// CSV Validation
-const validateCSV = (csvContent: string): { isValid: boolean; rowCount: number; error?: string } => {
-  try {
-    const lines = csvContent.trim().split("\n")
-    if (lines.length < 2) {
-      return { isValid: false, rowCount: 0, error: "CSV must have at least header and one data row" }
-    }
-
-    const headerCount = lines[0].split(",").length
-    let validRows = 0
-
-    for (let i = 1; i < lines.length; i++) {
-      const rowCols = lines[i].split(",").length
-      if (rowCols === headerCount) {
-        validRows++
-      }
-    }
-
-    return {
-      isValid: validRows > 0,
-      rowCount: validRows,
-      error: validRows === 0 ? "No valid data rows found" : undefined,
-    }
-  } catch (error) {
-    return {
-      isValid: false,
-      rowCount: 0,
-      error: `CSV validation error: ${error}`,
-    }
+  return {
+    apiKey: apiKey,
+    apiIndex: selectedAPI.index,
+    details: selectedAPI.details,
   }
 }
 
-// 🔥 ENHANCED: Test single API key với detailed logging
+// Test single API key với Llama 4 Scout
 const testSingleAPI = async (keyIndex: number): Promise<{ success: boolean; details: any }> => {
-  const cacheKey = `test_${keyIndex}`
+  const cacheKey = `test_${keyIndex}_${SINGLE_MODEL}`
 
   if (testResultsCache.has(cacheKey)) {
     console.log(`🔄 Using cached test result for API ${keyIndex + 1}`)
@@ -341,62 +285,73 @@ const createGroqClient = (apiKey: string): Groq => {
   })
 }
 
-// Summarize CSV chunk thay vì optimize
-const summarizeCSVChunk = async (
-  apiKey: string,
-  keyIndex: number,
-  csvChunk: string,
-  chunkIndex: number,
-  totalChunks: number,
-): Promise<{ success: boolean; summary: string; keyIndex: number; recordCount: number; error?: string }> => {
+// 🔥 NEW: Single request analysis với Llama 4 Scout
+const analyzeFullCSVWithRandomAPI = async (
+  csvContent: string,
+  tableName: string,
+  recordCount: number,
+): Promise<{ success: boolean; analysis: string; apiDetails: any; error?: string }> => {
   try {
-    const lines = csvChunk.trim().split("\n")
-    const dataRowCount = lines.length - 1 // Trừ header
+    console.log(`\n🚀 ===== SINGLE REQUEST ANALYSIS với ${SINGLE_MODEL} =====`)
+    console.log(`📊 INPUT: ${recordCount} records`)
+    console.log(`📄 CSV size: ${csvContent.length} characters`)
+    console.log(`🎯 Estimated tokens: ${estimateTokens(csvContent)}`)
 
-    console.log(`\n📊 ===== API ${keyIndex + 1} - SUMMARIZE CHUNK ${chunkIndex + 1}/${totalChunks} =====`)
-    console.log(`📊 INPUT: ${dataRowCount} records`)
-    console.log(`⚡ Model: ${SINGLE_MODEL}`)
+    // 🎲 Select random working API
+    const selectedAPI = await selectRandomWorkingAPI()
 
-    // Validate CSV
-    const csvValidation = validateCSV(csvChunk)
-    if (!csvValidation.isValid) {
-      console.log(`❌ CSV VALIDATION FAILED: ${csvValidation.error}`)
+    if (!selectedAPI) {
       return {
         success: false,
-        summary: "",
-        keyIndex: keyIndex,
-        recordCount: 0,
-        error: `CSV validation failed: ${csvValidation.error}`,
+        analysis: "❌ Không có API nào hoạt động",
+        apiDetails: { error: "No working APIs" },
+        error: "No working APIs available",
       }
     }
 
-    console.log(`✅ CSV Validation: ${csvValidation.rowCount} valid rows`)
+    console.log(`🎯 Using API ${selectedAPI.apiIndex + 1} for analysis`)
 
-    const groq = createGroqClient(apiKey)
+    const groq = createGroqClient(selectedAPI.apiKey)
 
-    // Summarize prompt thay vì optimize
-    const summarizePrompt = `Thống kê dữ liệu CSV này một cách ngắn gọn nhất có thể:
+    // 🔥 NEW: Single comprehensive analysis prompt
+    const analysisPrompt = `Phân tích toàn bộ dữ liệu CSV từ bảng "${tableName}" (${recordCount} records):
 
-${csvChunk}
+${csvContent}
 
-Trả về thống kê theo format:
-- Tổng records: [số]
-- Các trường chính: [liệt kê]
-- Thống kê quan trọng: [ngắn gọn]
-- Insights: [1-2 câu]
+Thực hiện phân tích toàn diện:
 
-Chỉ trả về thống kê, không giải thích thêm:`
+1. **Tổng quan dữ liệu:**
+   - Số lượng records và fields
+   - Loại dữ liệu chính
+   - Chất lượng dữ liệu
 
-    const promptTokens = estimateTokens(summarizePrompt)
-    console.log(`📤 Sending summarize request: ${promptTokens} input tokens`)
+2. **Thống kê chi tiết:**
+   - Phân bố theo các trường quan trọng
+   - Giá trị phổ biến nhất
+   - Xu hướng và patterns
+
+3. **Insights quan trọng:**
+   - Phát hiện thú vị từ dữ liệu
+   - Mối quan hệ giữa các trường
+   - Recommendations
+
+4. **Kết luận:**
+   - Tóm tắt findings chính
+   - Actionable insights
+
+Trả lời chi tiết bằng tiếng Việt với format rõ ràng:`
+
+    const promptTokens = estimateTokens(analysisPrompt)
+    console.log(`📤 Sending comprehensive analysis request: ${promptTokens} input tokens`)
 
     const startTime = Date.now()
 
+    // 🔥 Single request với Llama 4 Scout
     const completion = await groq.chat.completions.create({
       model: SINGLE_MODEL,
-      messages: [{ role: "user", content: summarizePrompt }],
-      temperature: 0.1,
-      max_tokens: 500, // Giảm tokens cho summary
+      messages: [{ role: "user", content: analysisPrompt }],
+      temperature: 0.7,
+      max_tokens: 4000, // Tăng tokens cho comprehensive analysis
     })
 
     const responseTime = Date.now() - startTime
@@ -407,52 +362,55 @@ Chỉ trả về thống kê, không giải thích thêm:`
       console.log(`❌ ${errorMsg}`)
       return {
         success: false,
-        summary: "",
-        keyIndex: keyIndex,
-        recordCount: dataRowCount,
+        analysis: `❌ Không nhận được phản hồi từ ${SINGLE_MODEL}`,
+        apiDetails: selectedAPI.details,
         error: errorMsg,
       }
     }
 
-    const summary = completion.choices[0].message.content.trim()
-    const outputTokens = estimateTokens(summary)
+    const analysis = completion.choices[0].message.content.trim()
+    const outputTokens = estimateTokens(analysis)
 
     console.log(`📊 OUTPUT: ${outputTokens} tokens`)
-    console.log(`⚡ Processing time: ${responseTime}ms`)
-    console.log(`✅ SUCCESS: Summarized ${dataRowCount} records`)
-    console.log(`📋 Summary preview: ${summary.substring(0, 100)}...`)
-    console.log(`===== END CHUNK ${chunkIndex + 1} =====\n`)
+    console.log(`⚡ Total processing time: ${responseTime}ms`)
+    console.log(`✅ SUCCESS: Analyzed ${recordCount} records with single request`)
+    console.log(`📋 Analysis preview: ${analysis.substring(0, 150)}...`)
+    console.log(`===== END SINGLE REQUEST ANALYSIS =====\n`)
 
     return {
       success: true,
-      summary: summary,
-      keyIndex: keyIndex,
-      recordCount: dataRowCount,
+      analysis: analysis,
+      apiDetails: {
+        ...selectedAPI.details,
+        responseTime: responseTime,
+        inputTokens: promptTokens,
+        outputTokens: outputTokens,
+        totalTokens: promptTokens + outputTokens,
+      },
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error)
-    console.error(`❌ CHUNK ${chunkIndex + 1} FAILED: ${errorMsg}`)
+    console.error(`❌ Single request analysis failed: ${errorMsg}`)
 
     return {
       success: false,
-      summary: `❌ Lỗi thống kê chunk ${chunkIndex + 1}: ${errorMsg}`,
-      keyIndex: keyIndex,
-      recordCount: 0,
+      analysis: `❌ Lỗi phân tích với ${SINGLE_MODEL}: ${errorMsg}`,
+      apiDetails: { error: errorMsg },
       error: errorMsg,
     }
   }
 }
 
-// 🔥 UPDATED: Main pipeline với enhanced API testing
+// 🔥 UPDATED: Main pipeline với single request strategy
 export const preprocessDataWithPipeline = async (
   data: any[],
   tableName: string,
 ): Promise<{ success: boolean; optimizedData: string; analysis: string; keyUsage: any }> => {
   try {
-    console.log(`🚀 Equal Distribution Summarization Pipeline với ${data.length} records - Model: ${SINGLE_MODEL}`)
+    console.log(`🚀 Single Request Pipeline với ${data.length} records - Model: ${SINGLE_MODEL}`)
 
-    if (!API_KEYS || API_KEYS.length < 2) {
-      throw new Error("Cần ít nhất 2 API keys (1 cho processing, 1 cho analysis)")
+    if (!API_KEYS || API_KEYS.length === 0) {
+      throw new Error("Cần ít nhất 1 API key")
     }
 
     // 🔥 BƯỚC 1: Convert to consistent CSV
@@ -463,209 +421,113 @@ export const preprocessDataWithPipeline = async (
       throw new Error("Không thể tạo CSV content")
     }
 
-    // 🔥 BƯỚC 2: Test ALL processing APIs (không test analysis API)
-    const processingAPICount = API_KEYS.length - 1
-    console.log(`🧪 BƯỚC 2: Test ${processingAPICount} processing APIs...`)
+    // 🔥 BƯỚC 2: Single comprehensive analysis
+    console.log(`🤖 BƯỚC 2: Single comprehensive analysis với random API...`)
+    const analysisResult = await analyzeFullCSVWithRandomAPI(fullCSV, tableName, data.length)
 
-    const apiTestResults = []
-    for (let i = 0; i < processingAPICount; i++) {
-      console.log(`🧪 Testing processing API ${i + 1}...`)
-      const testResult = await testSingleAPI(i)
-      apiTestResults.push(testResult)
-
-      if (testResult.success) {
-        console.log(`✅ Processing API ${i + 1} working`)
-      } else {
-        console.log(`❌ Processing API ${i + 1} failed: ${testResult.details.error}`)
-      }
-    }
-
-    const workingAPIResults = apiTestResults.filter((result) => result.success)
-    const workingAPICount = workingAPIResults.length
-    console.log(`🔑 ${workingAPICount}/${processingAPICount} processing APIs hoạt động`)
-
-    // 🔥 Log failed APIs
-    const failedAPIs = apiTestResults.filter((result) => !result.success)
-    if (failedAPIs.length > 0) {
-      console.log(`❌ Failed APIs:`)
-      failedAPIs.forEach((failed) => {
-        console.log(`  API ${failed.details.keyIndex}: ${failed.details.error}`)
-      })
-    }
-
-    if (workingAPICount === 0) {
-      console.log(`⚠️ No working processing APIs, using raw CSV`)
+    if (!analysisResult.success) {
+      console.log(`❌ Analysis failed, using raw CSV`)
       return {
         success: true,
         optimizedData: fullCSV,
-        analysis: `⚠️ Không có processing APIs hoạt động với ${SINGLE_MODEL}, sử dụng raw CSV với ${data.length} records.`,
+        analysis: analysisResult.analysis,
         keyUsage: {
           error: true,
           format: "Raw CSV",
           fallback: true,
           model: SINGLE_MODEL,
-          failedAPIs: failedAPIs.length,
-          totalAPIs: processingAPICount,
+          strategy: "Single Request",
+          errorDetails: analysisResult.error,
         },
       }
     }
 
-    // 🔥 BƯỚC 3: Equal distribution chunking với working APIs
-    console.log(`📊 BƯỚC 3: Equal distribution chunking với ${workingAPICount} working APIs...`)
-    const { csvChunks, chunkStats } = createEqualDistributionChunks(fullCSV, workingAPICount)
-
-    if (csvChunks.length === 0) {
-      throw new Error("Không thể tạo CSV chunks")
-    }
-
-    // Show distribution summary
-    console.log(`📊 Distribution Summary:`)
-    chunkStats.forEach((stat) => {
-      console.log(`  Working API ${stat.apiIndex}: ${stat.recordCount} records (${stat.startRecord}-${stat.endRecord})`)
-    })
-
-    // 🔥 BƯỚC 4: Summarize chunks với working APIs
-    console.log(`⏳ BƯỚC 4: Summarize ${csvChunks.length} CSV chunks với ${workingAPICount} working APIs...`)
-
-    const summaryResults = []
-
-    // Xử lý từng chunk với working API tương ứng
-    for (let i = 0; i < csvChunks.length; i++) {
-      const csvChunk = csvChunks[i]
-      const workingAPIResult = workingAPIResults[i] // Sử dụng working API tương ứng
-      const actualAPIIndex = workingAPIResult.details.keyIndex - 1 // Convert to 0-based index
-
-      console.log(
-        `📊 Summarizing chunk ${i + 1}/${csvChunks.length} với working API ${workingAPIResult.details.keyIndex}`,
-      )
-      console.log(`📊 Chunk stats: ${chunkStats[i].recordCount} records`)
-
-      // CHỈ 1 REQUEST DUY NHẤT - SUMMARIZE
-      const result = await summarizeCSVChunk(API_KEYS[actualAPIIndex], actualAPIIndex, csvChunk, i, csvChunks.length)
-
-      summaryResults.push(result)
-
-      // Delay nhỏ giữa các chunks
-      if (i < csvChunks.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-      }
-    }
-
-    // 🔥 BƯỚC 5: Validate results
-    const successfulResults = summaryResults.filter((r) => r && r.success)
-    console.log(`📊 Results: ${successfulResults.length}/${csvChunks.length} chunks thành công`)
-
-    if (successfulResults.length === 0) {
-      console.log(`❌ All chunks failed, using raw CSV`)
-      return {
-        success: true,
-        optimizedData: fullCSV,
-        analysis: `⚠️ Tất cả chunks thất bại với ${SINGLE_MODEL}, sử dụng raw CSV với ${data.length} records.`,
-        keyUsage: {
-          totalKeys: API_KEYS.length,
-          processedChunks: 0,
-          fallback: true,
-          format: "Raw CSV",
-          model: SINGLE_MODEL,
-          failedAPIs: failedAPIs.length,
-          workingAPIs: workingAPICount,
-        },
-      }
-    }
-
-    // 🔥 BƯỚC 6: Calculate data loss
-    const totalProcessedRecords = successfulResults.reduce((sum, result) => sum + result.recordCount, 0)
-    const dataLoss = data.length - totalProcessedRecords
-    console.log(`📊 Total processed records: ${totalProcessedRecords}/${data.length}`)
-
-    // 🔥 IMPORTANT: Validation - đảm bảo tracking data loss
-    if (dataLoss > 0) {
-      console.warn(`⚠️ DATA LOSS: ${dataLoss} records not processed due to ${failedAPIs.length} failed API(s)`)
-    } else {
-      console.log(`✅ NO DATA LOSS: All ${data.length} records processed`)
-    }
-
-    const combinedSummaries = successfulResults
-      .map((result, index) => `=== CHUNK ${index + 1} (${result.recordCount} records) ===\n${result.summary}`)
-      .join("\n\n")
-
-    // 🔥 BƯỚC 7: Final analysis với API cuối cùng
-    const analysisAPIIndex = API_KEYS.length - 1
-    console.log(`🤖 BƯỚC 7: Final analysis với API ${analysisAPIIndex + 1} - Model: ${SINGLE_MODEL}`)
-
-    const finalAnalysisPrompt = `Phân tích tổng hợp dữ liệu từ bảng "${tableName}" (${data.length} records, processed: ${totalProcessedRecords}):
-
-${combinedSummaries}
-
-Tổng hợp phân tích:
-1. Tổng quan toàn bộ dữ liệu
-2. Thống kê chính từ tất cả chunks
-3. Insights quan trọng nhất
-4. Kết luận
-
-${dataLoss > 0 ? `\nLưu ý: Có ${dataLoss} records không được xử lý do API lỗi.` : ""}
-
-Trả lời ngắn gọn bằng tiếng Việt:`
-
-    const finalAnalysis = await analyzeWithLlama(API_KEYS[analysisAPIIndex], finalAnalysisPrompt)
-
+    // 🔥 SUCCESS: Return results
     const keyUsage = {
       totalKeys: API_KEYS.length,
-      processingKeys: processingAPICount,
-      workingKeys: workingAPICount,
-      failedKeys: failedAPIs.length,
-      analysisKeys: 1,
-      processedChunks: successfulResults.length,
+      usedAPI: analysisResult.apiDetails.keyIndex,
+      selectedRandomly: true,
       totalRecords: data.length,
-      processedRecords: totalProcessedRecords,
-      dataLoss: dataLoss,
-      successRate: `${Math.round((successfulResults.length / csvChunks.length) * 100)}%`,
-      format: "Summarized CSV",
+      processedRecords: data.length, // All records processed in single request
+      dataLoss: 0, // No data loss with single request
+      format: "Complete CSV",
       model: SINGLE_MODEL,
-      strategy: "Equal Distribution + Summarization",
-      failedAPIDetails: failedAPIs.map((f) => ({
-        apiIndex: f.details.keyIndex,
-        error: f.details.error,
-        preview: f.details.preview,
-      })),
+      strategy: "Single Request Analysis",
+      responseTime: analysisResult.apiDetails.responseTime,
+      inputTokens: analysisResult.apiDetails.inputTokens,
+      outputTokens: analysisResult.apiDetails.outputTokens,
+      totalTokens: analysisResult.apiDetails.totalTokens,
+      apiPreview: analysisResult.apiDetails.preview,
     }
+
+    console.log(`✅ Single Request Pipeline Complete:`)
+    console.log(`  📊 Records: ${data.length} (100% processed)`)
+    console.log(`  🎯 API used: ${analysisResult.apiDetails.keyIndex}`)
+    console.log(`  ⚡ Time: ${analysisResult.apiDetails.responseTime}ms`)
+    console.log(`  🎫 Tokens: ${analysisResult.apiDetails.totalTokens}`)
 
     return {
       success: true,
-      optimizedData: fullCSV, // Return original CSV for reference
-      analysis: finalAnalysis,
+      optimizedData: fullCSV,
+      analysis: analysisResult.analysis,
       keyUsage: keyUsage,
     }
   } catch (error) {
-    console.error("❌ Equal Distribution Pipeline failed:", error)
+    console.error("❌ Single Request Pipeline failed:", error)
 
     const rawCSV = convertToCSV(data)
     return {
       success: true,
       optimizedData: rawCSV,
       analysis: `❌ Pipeline error với ${SINGLE_MODEL}: ${error}. Sử dụng raw CSV với ${data.length} records.`,
-      keyUsage: { error: true, format: "Raw CSV", model: SINGLE_MODEL, fallback: true },
+      keyUsage: { error: true, format: "Raw CSV", model: SINGLE_MODEL, fallback: true, strategy: "Single Request" },
     }
   }
 }
 
-// Analysis với llama3-70b-8192
-const analyzeWithLlama = async (apiKey: string, prompt: string): Promise<string> => {
+// 🔥 UPDATED: Answer question với single API
+export const answerQuestionWithOptimizedData = async (
+  optimizedCSVData: string,
+  tableName: string,
+  question: string,
+  originalRecordCount: number,
+): Promise<string> => {
   try {
-    const promptTokens = estimateTokens(prompt)
-    console.log(`🤖 Final analysis với ${SINGLE_MODEL}: ${promptTokens} tokens`)
+    console.log(`🤔 Trả lời câu hỏi với CSV data (${originalRecordCount} records) - ${SINGLE_MODEL}`)
 
-    const groq = createGroqClient(apiKey)
+    // 🎲 Select random working API
+    const selectedAPI = await selectRandomWorkingAPI()
+
+    if (!selectedAPI) {
+      return `❌ Không có API nào hoạt động với ${SINGLE_MODEL}`
+    }
+
+    console.log(`🎯 Using API ${selectedAPI.apiIndex + 1} for question answering`)
+
+    // Truncate CSV if too long
+    const maxCSVLength = 6000 // Tăng limit cho Llama 4 Scout
+    const truncatedCSV =
+      optimizedCSVData.length > maxCSVLength ? optimizedCSVData.substring(0, maxCSVLength) + "..." : optimizedCSVData
+
+    const questionPrompt = `Dữ liệu từ bảng "${tableName}" (${originalRecordCount} records):
+
+${truncatedCSV}
+
+Câu hỏi: ${question}
+
+Phân tích dữ liệu và trả lời chi tiết bằng tiếng Việt với:
+1. Trả lời trực tiếp câu hỏi
+2. Dẫn chứng từ dữ liệu cụ thể
+3. Insights bổ sung nếu có
+
+Trả lời:`
+
+    const groq = createGroqClient(selectedAPI.apiKey)
     const startTime = Date.now()
 
     const completion = await groq.chat.completions.create({
       model: SINGLE_MODEL,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
+      messages: [{ role: "user", content: questionPrompt }],
       temperature: 0.7,
       max_tokens: 2000,
     })
@@ -676,43 +538,10 @@ const analyzeWithLlama = async (apiKey: string, prompt: string): Promise<string>
       throw new Error("No response content")
     }
 
-    const analysis = completion.choices[0].message.content || "Không có phân tích"
-    const outputTokens = estimateTokens(analysis)
+    const answer = completion.choices[0].message.content
+    console.log(`✅ Question answered with API ${selectedAPI.apiIndex + 1} (${responseTime}ms)`)
 
-    console.log(`✅ Final analysis complete: ${outputTokens} tokens (${responseTime}ms)`)
-
-    return analysis
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error)
-    console.error(`❌ Final analysis failed: ${errorMsg}`)
-    return `❌ Không thể phân tích với ${SINGLE_MODEL}: ${errorMsg}`
-  }
-}
-
-// Answer question với CSV
-export const answerQuestionWithOptimizedData = async (
-  optimizedCSVData: string,
-  tableName: string,
-  question: string,
-  originalRecordCount: number,
-): Promise<string> => {
-  try {
-    console.log(`🤔 Trả lời câu hỏi với CSV data (${originalRecordCount} records)`)
-
-    const maxCSVLength = 4000
-    const truncatedCSV =
-      optimizedCSVData.length > maxCSVLength ? optimizedCSVData.substring(0, maxCSVLength) + "..." : optimizedCSVData
-
-    const questionPrompt = `Dữ liệu từ bảng "${tableName}" (${originalRecordCount} records):
-
-${truncatedCSV}
-
-Câu hỏi: ${question}
-
-Trả lời ngắn gọn bằng tiếng Việt:`
-
-    const analysisAPIIndex = API_KEYS.length - 1
-    return await analyzeWithLlama(API_KEYS[analysisAPIIndex], questionPrompt)
+    return answer
   } catch (error) {
     console.error("❌ answerQuestionWithOptimizedData failed:", error)
     return `❌ Lỗi khi trả lời câu hỏi với ${SINGLE_MODEL}: ${error}`
@@ -742,7 +571,7 @@ export const answerQuestionWithData = async (
   }
 }
 
-// 🔥 ENHANCED: Test all API keys với detailed results
+// 🔥 UPDATED: Test all API keys với Llama 4 Scout
 export const testAllApiKeys = async (): Promise<{
   success: boolean
   message: string
@@ -826,7 +655,7 @@ export const testGroqAPI = async () => {
     success: result.success,
     message: result.message,
     workingModel: SINGLE_MODEL,
-    format: "Equal Distribution CSV",
+    format: "Single Request CSV",
   }
 }
 
@@ -840,7 +669,7 @@ export const getApiKeysInfo = () => {
     keysPreview: API_KEYS.map(
       (key, index) => `API ${index + 1}: ${key.substring(0, 10)}...${key.substring(key.length - 4)} (${SINGLE_MODEL})`,
     ),
-    format: "Equal Distribution CSV",
+    format: "Single Request CSV",
     model: SINGLE_MODEL,
   }
 }

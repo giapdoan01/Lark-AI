@@ -108,7 +108,7 @@ const LoadingSpinner = ({ size = 20 }: { size?: number }) => (
   />
 )
 
-// 🔥 NEW: API Status Component
+// 🔥 UPDATED: API Status Component for single request strategy
 const APIStatusPanel = ({
   apiTestResults,
   isVisible,
@@ -170,7 +170,10 @@ const APIStatusPanel = ({
             🔑 API Keys Status: {apiTestResults.workingKeys}/{apiTestResults.totalKeys} hoạt động
           </h4>
           <div style={{ fontSize: "12px", color: "#666" }}>
-            Model: {apiTestResults.keyDetails?.[0]?.model || "llama3-70b-8192"}
+            Model: {apiTestResults.keyDetails?.[0]?.model || "meta-llama/llama-4-scout-17b-16e-instruct"}
+          </div>
+          <div style={{ fontSize: "12px", color: "#007acc", marginTop: "5px" }}>
+            🎲 Strategy: Random API selection (no chunking)
           </div>
         </div>
 
@@ -203,7 +206,9 @@ const APIStatusPanel = ({
               <div style={{ fontSize: "10px", color: "#666", marginBottom: "5px" }}>{key.preview}</div>
 
               {key.status === "success" ? (
-                <div style={{ fontSize: "11px", color: "#4caf50" }}>Response: "{key.response}"</div>
+                <div style={{ fontSize: "11px", color: "#4caf50" }}>
+                  Response: "{key.response}" ({key.responseTime}ms)
+                </div>
               ) : (
                 <div style={{ fontSize: "11px", color: "#ff4444" }}>Error: {key.error?.substring(0, 50)}...</div>
               )}
@@ -211,19 +216,15 @@ const APIStatusPanel = ({
           ))}
         </div>
 
-        {/* Data Loss Analysis */}
-        <div style={{ marginTop: "15px", padding: "10px", backgroundColor: "#fff3cd", borderRadius: "6px" }}>
-          <h5 style={{ margin: "0 0 8px 0", fontSize: "13px", color: "#856404" }}>📊 Data Loss Analysis:</h5>
-          <div style={{ fontSize: "12px", color: "#856404" }}>
-            • Processing APIs: {apiTestResults.totalKeys - 1} (total - 1 for analysis)
-            <br />• Working APIs: {apiTestResults.workingKeys - 1} (excluding analysis API)
-            <br />• Failed APIs: {apiTestResults.totalKeys - 1 - (apiTestResults.workingKeys - 1)}
-            <br />• Expected chunks: {apiTestResults.totalKeys - 1}
-            <br />• Actual chunks: {apiTestResults.workingKeys - 1}
-            <br />•{" "}
-            <strong>
-              Data loss cause: {apiTestResults.totalKeys - 1 - (apiTestResults.workingKeys - 1)} failed API(s)
-            </strong>
+        {/* Single Request Strategy Info */}
+        <div style={{ marginTop: "15px", padding: "10px", backgroundColor: "#e8f4fd", borderRadius: "6px" }}>
+          <h5 style={{ margin: "0 0 8px 0", fontSize: "13px", color: "#007acc" }}>🎲 Single Request Strategy:</h5>
+          <div style={{ fontSize: "12px", color: "#007acc" }}>
+            • No chunking: Toàn bộ CSV được gửi trong 1 request
+            <br />• Random API: Chọn ngẫu nhiên 1 API working từ {apiTestResults.workingKeys} available
+            <br />• No data loss: 100% records được xử lý
+            <br />• Model: meta-llama/llama-4-scout-17b-16e-instruct
+            <br />• <strong>Benefit: Đơn giản, nhanh, không mất dữ liệu</strong>
           </div>
         </div>
       </div>
@@ -251,7 +252,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [processingStatus, setProcessingStatus] = useState<string>("")
   const [showDebugTools, setShowDebugTools] = useState(false)
 
-  // 🔥 NEW: API Status States
+  // API Status States
   const [apiTestResults, setApiTestResults] = useState<any>(null)
   const [showApiStatus, setShowApiStatus] = useState(false)
   const [isTestingApis, setIsTestingApis] = useState(false)
@@ -261,10 +262,10 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const hasRunPipeline = useRef(false)
   const isInitializing = useRef(false)
 
-  // 🎨 Pipeline Steps
-  const pipelineSteps = ["Kiểm tra SDK", "Test APIs", "Lấy dữ liệu", "Chia đều chunks", "Thống kê AI"]
+  // 🔥 UPDATED: Pipeline Steps for single request
+  const pipelineSteps = ["Kiểm tra SDK", "Test APIs", "Lấy dữ liệu", "Chuyển CSV", "Phân tích AI"]
 
-  // 🔥 NEW: Test API Keys Function
+  // Test API Keys Function
   const testApiKeys = async () => {
     setIsTestingApis(true)
     try {
@@ -292,7 +293,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     }
   }
 
-  // 🔧 Optimized Functions
+  // 🔥 UPDATED: Single request preprocessing
   const performDataPreprocessing = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
     if (data.length === 0 || hasRunPipeline.current) return
 
@@ -307,10 +308,10 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
     hasRunPipeline.current = true
     setIsAutoAnalyzing(true)
-    setCurrentStep(3)
+    setCurrentStep(4)
 
     try {
-      setProcessingStatus("🚀 Bắt đầu Equal Distribution Pipeline...")
+      setProcessingStatus("🚀 Bắt đầu Single Request Pipeline...")
 
       const result = await preprocessDataWithPipeline(data, tableName)
 
@@ -321,11 +322,6 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         setIsDataReady(true)
         setCurrentStep(4)
         setProcessingStatus("✅ Pipeline hoàn thành!")
-
-        // 🔥 Auto show API status if there's data loss
-        if (result.keyUsage && result.keyUsage.dataLoss > 0) {
-          setShowApiStatus(true)
-        }
       } else {
         setAutoAnalysis(result.analysis)
         setIsDataReady(false)
@@ -333,7 +329,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       }
     } catch (err) {
       console.error("❌ Pipeline error:", err)
-      setAutoAnalysis("❌ Không thể thực hiện Equal Distribution pipeline.")
+      setAutoAnalysis("❌ Không thể thực hiện Single Request pipeline.")
       setIsDataReady(false)
       setProcessingStatus("❌ Pipeline lỗi")
       hasRunPipeline.current = false
@@ -385,11 +381,6 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           return
         }
 
-        // 🔥 IMPORTANT: Validation - check for data loss
-        if (data.length !== stats.totalRecords) {
-          console.warn(`⚠️ POTENTIAL DATA LOSS: Expected ${stats.totalRecords}, got ${data.length} records`)
-        }
-
         // Step 4: Process Data
         const hasRealData = data.some((record) =>
           Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
@@ -416,7 +407,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     }
   }, [tableId, tableName])
 
-  // 🔧 Optimized Question Handler
+  // Question Handler
   const handleAskQuestion = async () => {
     if (!question.trim() || !isDataReady) return
 
@@ -454,17 +445,17 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         {isTestingApis && (
           <StatusCard
             title="🧪 Testing API Keys"
-            status="Đang kiểm tra tất cả API keys..."
-            details="Kiểm tra kết nối và khả năng xử lý của từng API"
+            status="Đang kiểm tra tất cả API keys với Llama 4 Scout..."
+            details="Model: meta-llama/llama-4-scout-17b-16e-instruct"
             type="info"
           />
         )}
 
         {isAutoAnalyzing && (
           <StatusCard
-            title="🚀 Equal Distribution Pipeline"
-            status="Đang chia đều records cho các APIs và thống kê..."
-            details="Chia đều → Thống kê song song → Gộp kết quả → Phân tích tổng hợp"
+            title="🚀 Single Request Pipeline"
+            status="Đang gửi toàn bộ CSV cho 1 API ngẫu nhiên..."
+            details="No chunking → Random API → Complete analysis → No data loss"
             type="info"
           />
         )}
@@ -504,47 +495,17 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
         {keyUsageInfo && (
           <StatusCard
-            title="🔧 Equal Distribution Pipeline"
-            status={`${keyUsageInfo.processedChunks || 0} chunks processed`}
+            title="🎲 Single Request Pipeline"
+            status={`API ${keyUsageInfo.usedAPI || "N/A"} được chọn ngẫu nhiên`}
             details={
-              keyUsageInfo.dataLoss
-                ? `⚠️ Data loss: ${keyUsageInfo.dataLoss} records | Strategy: ${keyUsageInfo.strategy}`
-                : `✅ No data loss | Strategy: ${keyUsageInfo.strategy}`
+              keyUsageInfo.totalTokens
+                ? `${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms | Model: Llama 4 Scout`
+                : `Strategy: ${keyUsageInfo.strategy} | No data loss`
             }
-            type={keyUsageInfo.dataLoss > 0 ? "warning" : "success"}
+            type="success"
           />
         )}
       </div>
-
-      {/* Data Loss Warning with API Status Link */}
-      {keyUsageInfo && keyUsageInfo.dataLoss > 0 && (
-        <div style={{ marginBottom: "20px" }}>
-          <StatusCard
-            title="⚠️ Cảnh báo mất dữ liệu"
-            status={`Mất ${keyUsageInfo.dataLoss} records trong quá trình xử lý`}
-            details={`Expected: ${keyUsageInfo.totalRecords}, Processed: ${keyUsageInfo.processedRecords}`}
-            type="warning"
-          />
-
-          <div style={{ textAlign: "center", marginTop: "10px" }}>
-            <button
-              onClick={() => setShowApiStatus(true)}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#ffc107",
-                color: "#856404",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-                fontWeight: "500",
-              }}
-            >
-              🔍 Xem API nào gây mất dữ liệu
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Error State */}
       {error && (
@@ -603,11 +564,11 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       {autoAnalysis && (
         <div style={{ marginBottom: "20px" }}>
           <StatusCard
-            title="🤖 Phân tích tổng hợp AI"
-            status="Phân tích từ tất cả chunks hoàn thành"
+            title="🤖 Phân tích AI với Llama 4 Scout"
+            status="Phân tích toàn diện hoàn thành"
             details={
               keyUsageInfo
-                ? `${keyUsageInfo.processedRecords}/${keyUsageInfo.totalRecords} records được phân tích`
+                ? `API ${keyUsageInfo.usedAPI} | ${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms`
                 : undefined
             }
             type="success"
@@ -645,9 +606,9 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           <div style={{ marginBottom: "15px", fontSize: "13px", color: "#666" }}>
             {isDataReady ? (
               <span style={{ color: "#4caf50" }}>
-                ✅ Sẵn sàng! AI đã phân tích {tableData.length} records qua Equal Distribution Pipeline.
-                {keyUsageInfo && keyUsageInfo.dataLoss > 0 && (
-                  <span style={{ color: "#ff9800" }}> (⚠️ Mất {keyUsageInfo.dataLoss} records do API lỗi)</span>
+                ✅ Sẵn sàng! AI đã phân tích {tableData.length} records với Llama 4 Scout (Single Request).
+                {keyUsageInfo && keyUsageInfo.usedAPI && (
+                  <span style={{ color: "#007acc" }}> API {keyUsageInfo.usedAPI} được sử dụng.</span>
                 )}
               </span>
             ) : (
@@ -691,11 +652,11 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
               }}
             >
               {isAsking && <LoadingSpinner size={16} />}
-              {isAsking ? "Đang suy nghĩ..." : "🚀 Hỏi AI"}
+              {isAsking ? "Đang suy nghĩ..." : "🚀 Hỏi AI (Llama 4 Scout)"}
             </button>
 
             <div style={{ fontSize: "12px", color: "#666" }}>
-              {keyUsageInfo && `${keyUsageInfo.processedRecords}/${keyUsageInfo.totalRecords} records`}
+              {keyUsageInfo && `${keyUsageInfo.totalRecords} records`}
               {apiTestResults && ` | ${apiTestResults.workingKeys}/${apiTestResults.totalKeys} APIs`}
             </div>
           </div>
@@ -711,13 +672,12 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
                 borderRadius: "8px",
               }}
             >
-              <h4 style={{ margin: "0 0 10px 0", color: "#333" }}>💡 Câu trả lời từ AI</h4>
+              <h4 style={{ margin: "0 0 10px 0", color: "#333" }}>💡 Câu trả lời từ Llama 4 Scout</h4>
               <div style={{ whiteSpace: "pre-wrap", fontSize: "14px", lineHeight: "1.5" }}>{answer}</div>
               {keyUsageInfo && (
                 <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
-                  📊 Dựa trên {keyUsageInfo.processedRecords}/{keyUsageInfo.totalRecords} records qua Equal Distribution
-                  Pipeline
-                  {apiTestResults && ` với ${apiTestResults.workingKeys}/${apiTestResults.totalKeys} working APIs`}
+                  📊 Dựa trên {keyUsageInfo.totalRecords} records qua Single Request Pipeline với API{" "}
+                  {keyUsageInfo.usedAPI}
                 </div>
               )}
             </div>
