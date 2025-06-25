@@ -19,291 +19,113 @@ const estimateTokens = (text: string): number => {
   return Math.ceil(text.length / 4)
 }
 
-// 🔥 PRESERVE EVERYTHING: Enhanced field extraction với absolute zero data loss
+// 🔥 SIMPLIFIED: Clean field extraction - chỉ lấy giá trị thực
 const extractCompleteFieldValue = (value: unknown, fieldName?: string): string => {
-  // 🔍 DETAILED LOGGING for absolute zero data loss tracking
-  const logExtraction = (input: unknown, output: string, method: string) => {
-    if (fieldName && output.length > 0) {
-      console.log(`✅ Field "${fieldName}": ${method} → "${output.substring(0, 50)}${output.length > 50 ? "..." : ""}"`)
-    } else if (fieldName) {
-      console.log(`⚠️ Field "${fieldName}": ${method} → EMPTY (input: ${typeof input})`)
-    }
+  // 1. Handle null/undefined
+  if (value === null || value === undefined) {
+    return "" // Empty string for CSV
   }
 
-  // 1. Handle null/undefined - but preserve the information
-  if (value === null) {
-    logExtraction(value, "NULL", "null value")
-    return "NULL"
-  }
-
-  if (value === undefined) {
-    logExtraction(value, "UNDEFINED", "undefined value")
-    return "UNDEFINED"
-  }
-
-  // 2. Handle primitive types - preserve exactly with type info
+  // 2. Handle primitive types
   if (typeof value === "string") {
-    const result = value.trim()
-    // 🔥 PRESERVE EMPTY STRINGS TOO
-    if (result === "") {
-      logExtraction(value, "EMPTY_STRING", "empty string")
-      return "EMPTY_STRING"
-    }
-    logExtraction(value, result, "string")
-    return result
+    return value.trim()
   }
 
   if (typeof value === "number") {
-    const result = String(value)
-    logExtraction(value, result, "number")
-    return result
+    return String(value)
   }
 
   if (typeof value === "boolean") {
-    const result = value ? "TRUE" : "FALSE"
-    logExtraction(value, result, "boolean")
-    return result
+    return value ? "TRUE" : "FALSE"
   }
 
-  // 3. Handle Date objects - preserve with full info
+  // 3. Handle Date objects
   if (value instanceof Date) {
-    const result = value.toISOString()
-    logExtraction(value, result, "Date object")
-    return result
+    return value.toISOString().split("T")[0] // Just date part: 2024-01-15
   }
 
-  // 4. 🔥 ABSOLUTE PRESERVATION: Handle ALL objects and arrays
+  // 4. Handle objects and arrays - extract ONLY the actual values
   if (typeof value === "object") {
     try {
       const jsonStr = JSON.stringify(value)
-      console.log(`🔍 Processing object field "${fieldName}": ${jsonStr.substring(0, 100)}...`)
 
-      // Handle empty objects - but preserve the info
-      if (jsonStr === "null") {
-        logExtraction(value, "NULL_OBJECT", "null object")
-        return "NULL_OBJECT"
+      // Handle empty objects/arrays
+      if (jsonStr === "null" || jsonStr === "{}" || jsonStr === "[]") {
+        return ""
       }
 
-      if (jsonStr === "{}") {
-        logExtraction(value, "EMPTY_OBJECT", "empty object")
-        return "EMPTY_OBJECT"
-      }
-
-      if (jsonStr === "[]") {
-        logExtraction(value, "EMPTY_ARRAY", "empty array")
-        return "EMPTY_ARRAY"
-      }
-
-      // 🔥 COMPREHENSIVE EXTRACTION: Try all possible patterns
-      const extractedValues: string[] = []
-
-      // PATTERN 1: Text objects - extract ALL text content
+      // Extract only TEXT values (the actual content)
       const textMatches = jsonStr.match(/"text":"([^"]*(?:\\.[^"]*)*)"/g)
-      if (textMatches) {
-        textMatches.forEach((match) => {
-          const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*)*)"/)
-          if (textMatch) {
-            const text = textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\")
-            if (text.trim() !== "") {
-              extractedValues.push(`TEXT:${text}`)
-            }
-          }
-        })
+      if (textMatches && textMatches.length > 0) {
+        const texts = textMatches
+          .map((match) => {
+            const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*)*)"/)
+            return textMatch ? textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
+          })
+          .filter((text) => text.trim() !== "")
+
+        if (texts.length > 0) {
+          return texts.join(", ") // Multiple texts separated by comma
+        }
       }
 
-      // PATTERN 2: All "name" fields
+      // Extract NAME values if no text found
       const nameMatches = jsonStr.match(/"name":"([^"]*(?:\\.[^"]*)*)"/g)
-      if (nameMatches) {
-        nameMatches.forEach((match) => {
-          const nameMatch = match.match(/"name":"([^"]*(?:\\.[^"]*)*)"/)
-          if (nameMatch) {
-            const name = nameMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\")
-            if (name.trim() !== "") {
-              extractedValues.push(`NAME:${name}`)
-            }
-          }
-        })
+      if (nameMatches && nameMatches.length > 0) {
+        const names = nameMatches
+          .map((match) => {
+            const nameMatch = match.match(/"name":"([^"]*(?:\\.[^"]*)*)"/)
+            return nameMatch ? nameMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
+          })
+          .filter((name) => name.trim() !== "")
+
+        if (names.length > 0) {
+          return names.join(", ")
+        }
       }
 
-      // PATTERN 3: All "id" fields
-      const idMatches = jsonStr.match(/"id":"([^"]*(?:\\.[^"]*)*)"/g)
-      if (idMatches) {
-        idMatches.forEach((match) => {
-          const idMatch = match.match(/"id":"([^"]*(?:\\.[^"]*)*)"/)
-          if (idMatch) {
-            const id = idMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\")
-            if (id.trim() !== "") {
-              extractedValues.push(`ID:${id}`)
-            }
-          }
-        })
-      }
-
-      // PATTERN 4: All "email" fields
-      const emailMatches = jsonStr.match(/"email":"([^"]*(?:\\.[^"]*)*)"/g)
-      if (emailMatches) {
-        emailMatches.forEach((match) => {
-          const emailMatch = match.match(/"email":"([^"]*(?:\\.[^"]*)*)"/)
-          if (emailMatch) {
-            const email = emailMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\")
-            if (email.trim() !== "") {
-              extractedValues.push(`EMAIL:${email}`)
-            }
-          }
-        })
-      }
-
-      // PATTERN 5: All "url" fields
-      const urlMatches = jsonStr.match(/"url":"([^"]*(?:\\.[^"]*)*)"/g)
-      if (urlMatches) {
-        urlMatches.forEach((match) => {
-          const urlMatch = match.match(/"url":"([^"]*(?:\\.[^"]*)*)"/)
-          if (urlMatch) {
-            const url = urlMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\")
-            if (url.trim() !== "") {
-              extractedValues.push(`URL:${url}`)
-            }
-          }
-        })
-      }
-
-      // PATTERN 6: All "link" fields
-      const linkMatches = jsonStr.match(/"link":"([^"]*(?:\\.[^"]*)*)"/g)
-      if (linkMatches) {
-        linkMatches.forEach((match) => {
-          const linkMatch = match.match(/"link":"([^"]*(?:\\.[^"]*)*)"/)
-          if (linkMatch) {
-            const link = linkMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\")
-            if (link.trim() !== "") {
-              extractedValues.push(`LINK:${link}`)
-            }
-          }
-        })
-      }
-
-      // PATTERN 7: All "value" fields
-      const valueMatches = jsonStr.match(/"value":"([^"]*(?:\\.[^"]*)*)"/g)
-      if (valueMatches) {
-        valueMatches.forEach((match) => {
-          const valueMatch = match.match(/"value":"([^"]*(?:\\.[^"]*)*)"/)
-          if (valueMatch) {
-            const val = valueMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\")
-            if (val.trim() !== "") {
-              extractedValues.push(`VALUE:${val}`)
-            }
-          }
-        })
-      }
-
-      // PATTERN 8: All "title" fields
-      const titleMatches = jsonStr.match(/"title":"([^"]*(?:\\.[^"]*)*)"/g)
-      if (titleMatches) {
-        titleMatches.forEach((match) => {
-          const titleMatch = match.match(/"title":"([^"]*(?:\\.[^"]*)*)"/)
-          if (titleMatch) {
-            const title = titleMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\")
-            if (title.trim() !== "") {
-              extractedValues.push(`TITLE:${title}`)
-            }
-          }
-        })
-      }
-
-      // PATTERN 9: All "description" fields
-      const descMatches = jsonStr.match(/"description":"([^"]*(?:\\.[^"]*)*)"/g)
-      if (descMatches) {
-        descMatches.forEach((match) => {
-          const descMatch = match.match(/"description":"([^"]*(?:\\.[^"]*)*)"/)
-          if (descMatch) {
-            const desc = descMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\")
-            if (desc.trim() !== "") {
-              extractedValues.push(`DESC:${desc}`)
-            }
-          }
-        })
-      }
-
-      // PATTERN 10: All numeric values
-      const numberMatches = jsonStr.match(/"[^"]+":(\d+(?:\.\d+)?)/g)
-      if (numberMatches) {
-        numberMatches.forEach((match) => {
-          const numberMatch = match.match(/"([^"]+)":(\d+(?:\.\d+)?)/)
-          if (numberMatch) {
-            const key = numberMatch[1]
-            const num = numberMatch[2]
-            extractedValues.push(`${key.toUpperCase()}:${num}`)
-          }
-        })
-      }
-
-      // PATTERN 11: All boolean values
-      const boolMatches = jsonStr.match(/"[^"]+":(true|false)/g)
-      if (boolMatches) {
-        boolMatches.forEach((match) => {
-          const boolMatch = match.match(/"([^"]+)":(true|false)/)
-          if (boolMatch) {
-            const key = boolMatch[1]
-            const bool = boolMatch[2]
-            extractedValues.push(`${key.toUpperCase()}:${bool.toUpperCase()}`)
-          }
-        })
-      }
-
-      // 🔥 ARRAYS: Handle arrays recursively
+      // If it's an array, try to extract values recursively
       if (Array.isArray(value)) {
-        value.forEach((item, index) => {
-          const arrayValue = extractCompleteFieldValue(item, `${fieldName}[${index}]`)
-          if (arrayValue && arrayValue.trim() !== "") {
-            extractedValues.push(`ARRAY[${index}]:${arrayValue}`)
-          }
-        })
+        const arrayValues = value
+          .map((item) => extractCompleteFieldValue(item))
+          .filter((val) => val && val.trim() !== "")
+
+        if (arrayValues.length > 0) {
+          return arrayValues.join(", ")
+        }
       }
 
-      // 🔥 NESTED OBJECTS: Extract from nested objects
+      // For other objects, try to extract meaningful values
       if (typeof value === "object" && !Array.isArray(value)) {
+        const meaningfulValues: string[] = []
+
         Object.entries(value as Record<string, unknown>).forEach(([key, val]) => {
-          if (val !== null && val !== undefined) {
-            const nestedValue = extractCompleteFieldValue(val, `${fieldName}.${key}`)
-            if (nestedValue && nestedValue.trim() !== "") {
-              extractedValues.push(`${key.toUpperCase()}:${nestedValue}`)
+          if (key === "text" || key === "name" || key === "title" || key === "value") {
+            const extracted = extractCompleteFieldValue(val)
+            if (extracted && extracted.trim() !== "") {
+              meaningfulValues.push(extracted)
             }
           }
         })
+
+        if (meaningfulValues.length > 0) {
+          return meaningfulValues.join(", ")
+        }
       }
 
-      // 🔥 RETURN EXTRACTED VALUES OR PRESERVE FULL JSON
-      if (extractedValues.length > 0) {
-        const result = extractedValues.join(" | ")
-        console.log(`✅ Extracted ${extractedValues.length} values from object: "${result.substring(0, 100)}..."`)
-        logExtraction(value, result, "comprehensive extraction")
-        return result
-      }
-
-      // 🔥 ABSOLUTE FALLBACK: Preserve complete JSON (formatted for readability)
-      const fallbackResult = jsonStr.length > 1000 ? `JSON:${jsonStr.substring(0, 1000)}...` : `JSON:${jsonStr}`
-
-      console.log(`⚠️ Using complete JSON preservation for field "${fieldName}": ${fallbackResult.substring(0, 100)}...`)
-      logExtraction(value, fallbackResult, "complete JSON preservation")
-      return fallbackResult
+      // If nothing meaningful found, return empty
+      return ""
     } catch (error) {
-      console.error(`❌ Error parsing field "${fieldName}":`, error)
-      console.error(`   Original value:`, value)
-
-      // 🔥 EMERGENCY ABSOLUTE PRESERVATION
-      const emergencyResult = `ERROR_PRESERVED:${String(value).substring(0, 500)}`
-      logExtraction(value, emergencyResult, "emergency absolute preservation")
-      return emergencyResult
+      console.warn(`⚠️ Error extracting value for field "${fieldName}":`, error)
+      return ""
     }
   }
 
-  // 🔥 FINAL ABSOLUTE PRESERVATION for any unknown types
-  const finalResult = `UNKNOWN_TYPE:${String(value).substring(0, 500)}`
-  console.warn(`⚠️ Unknown type for field "${fieldName}": ${typeof value}`)
-  logExtraction(value, finalResult, "final absolute preservation")
-  return finalResult
+  // Final fallback
+  return String(value).trim()
 }
 
-// 🔥 ZERO DATA LOSS: Enhanced CSV conversion với complete data preservation + FIELD ORDER FIX
+// 🔥 CLEAN CSV: Standard CSV format without metadata
 const convertToEnhancedCSV = (
   data: Array<{ recordId: string; fields: Record<string, unknown> }>,
   fieldMetadata?: { fieldTypes: Record<string, string>; fieldNames: string[] },
@@ -314,22 +136,16 @@ const convertToEnhancedCSV = (
 } => {
   if (data.length === 0) return { csvContent: "", conversionReport: "No data", stats: {} }
 
-  console.log(`📊 ===== ZERO DATA LOSS CSV CONVERSION (FIELD ORDER FIXED) =====`)
-  console.log(`📊 Converting ${data.length} records with COMPLETE data preservation...`)
+  console.log(`📊 ===== CLEAN CSV CONVERSION =====`)
+  console.log(`📊 Converting ${data.length} records to clean CSV format...`)
 
-  // 🔥 FIX: Use field metadata order if available, otherwise analyze data
+  // Get field order from metadata or analyze data
   let orderedFieldNames: string[] = []
 
   if (fieldMetadata && fieldMetadata.fieldNames && fieldMetadata.fieldNames.length > 0) {
-    // Use the correct field order from metadata
     orderedFieldNames = [...fieldMetadata.fieldNames]
     console.log(`📋 Using field order from metadata: ${orderedFieldNames.length} fields`)
-    console.log(
-      `🔧 Field order: ${orderedFieldNames.slice(0, 5).join(", ")}${orderedFieldNames.length > 5 ? "..." : ""}`,
-    )
   } else {
-    // Fallback: analyze data to determine field order
-    console.log(`⚠️ No field metadata provided, analyzing data for field order...`)
     const allFieldNames = new Set<string>()
     data.forEach((record) => {
       Object.keys(record.fields).forEach((fieldName) => {
@@ -340,230 +156,79 @@ const convertToEnhancedCSV = (
     console.log(`📋 Determined field order from data: ${orderedFieldNames.length} fields`)
   }
 
-  // 🔍 STEP 1: Comprehensive field analysis với correct order
-  const fieldValueSamples: Record<string, unknown[]> = {}
-  const fieldStats: Record<
-    string,
-    {
-      totalValues: number
-      emptyValues: number
-      uniqueTypes: Set<string>
-      extractedValues: number
-      preservedValues: number
+  // Create clean field names (remove technical IDs)
+  const cleanFieldNames = orderedFieldNames.map((fieldName) => {
+    // Convert technical field names to readable ones
+    if (fieldName.match(/^fld[a-zA-Z0-9]+$/)) {
+      return `Field_${fieldName.substring(3, 8)}` // Shorter field names
     }
-  > = {}
 
-  // Initialize field stats in correct order
-  orderedFieldNames.forEach((fieldName) => {
-    fieldValueSamples[fieldName] = []
-    fieldStats[fieldName] = {
-      totalValues: 0,
-      emptyValues: 0,
-      uniqueTypes: new Set(),
-      extractedValues: 0,
-      preservedValues: 0,
-    }
+    // Clean up field names but keep them readable
+    return (
+      fieldName
+        .replace(/[^a-zA-Z0-9\s\-_]/g, "")
+        .replace(/\s+/g, "_")
+        .trim() || `Field_${fieldName.substring(0, 5)}`
+    )
   })
 
-  // 🔥 FIXED: Data preservation calculation - only count actual data, not empty fields
-  data.forEach((record, recordIndex) => {
-    // Process fields in the correct order
-    orderedFieldNames.forEach((fieldName) => {
-      const fieldValue = record.fields[fieldName] // Get value for this specific field
+  // Create CSV headers (clean format)
+  const csvHeaders = cleanFieldNames.map((name) => `"${name}"`).join(",")
 
-      if (!fieldValueSamples[fieldName]) {
-        fieldValueSamples[fieldName] = []
-        fieldStats[fieldName] = {
-          totalValues: 0,
-          emptyValues: 0,
-          uniqueTypes: new Set(),
-          extractedValues: 0,
-          preservedValues: 0,
-        }
-      }
-
-      fieldValueSamples[fieldName].push(fieldValue)
-      fieldStats[fieldName].totalValues++
-      fieldStats[fieldName].uniqueTypes.add(typeof fieldValue)
-
-      // 🔥 FIXED: Only count truly empty values, not null/undefined which have meaning
-      if (fieldValue === null || fieldValue === undefined) {
-        // These are not "empty" - they have semantic meaning
-        fieldStats[fieldName].preservedValues++ // Count as preserved
-      } else if (fieldValue === "") {
-        fieldStats[fieldName].emptyValues++
-      } else {
-        fieldStats[fieldName].preservedValues++
-      }
-
-      // Log first few samples for analysis
-      if (fieldValueSamples[fieldName].length <= 3) {
-        console.log(`🔍 Field "${fieldName}" sample ${fieldValueSamples[fieldName].length}:`, fieldValue)
-      }
-    })
-
-    // Check for any extra fields not in the ordered list
-    Object.keys(record.fields).forEach((fieldName) => {
-      if (!orderedFieldNames.includes(fieldName)) {
-        console.warn(`⚠️ Extra field found: "${fieldName}" (not in metadata order)`)
-        orderedFieldNames.push(fieldName) // Add to end
-        fieldValueSamples[fieldName] = []
-        fieldStats[fieldName] = {
-          totalValues: 0,
-          emptyValues: 0,
-          uniqueTypes: new Set(),
-          extractedValues: 0,
-          preservedValues: 0,
-        }
-      }
-    })
-  })
-
-  // 🔍 STEP 2: Create clean field names mapping (preserve order)
-  const fieldNameMapping: Record<string, string> = {}
-  const cleanFieldNames: string[] = []
-
-  orderedFieldNames.forEach((fieldName) => {
-    const cleanName = cleanFieldName(fieldName)
-    fieldNameMapping[fieldName] = cleanName
-    cleanFieldNames.push(cleanName)
-  })
-
-  console.log(`🔧 Field name mapping (in correct order):`)
-  orderedFieldNames.forEach((original, index) => {
-    const cleaned = fieldNameMapping[original]
-    console.log(`  ${index + 1}. "${original}" → "${cleaned}"`)
-  })
-
-  // 🔍 STEP 3: Create CSV headers (in correct order)
-  const headers = ["STT", "RecordID", ...cleanFieldNames]
-  const csvHeaders = headers.map((h) => `"${h}"`).join(",")
-
-  // 🔍 STEP 4: Convert records với ZERO DATA LOSS + CORRECT FIELD ORDER
+  // Convert data to clean CSV rows
   let totalExtractedValues = 0
-  let totalPreservedValues = 0
-  let extractionErrors = 0
+  let totalEmptyValues = 0
 
   const csvRows = data.map((record, recordIndex) => {
-    const values = [
-      `"${recordIndex + 1}"`, // STT
-      `"${record.recordId}"`, // RecordID
-      // 🔥 CRITICAL FIX: Process fields in the EXACT order from metadata
-      ...orderedFieldNames.map((originalFieldName) => {
-        const rawValue = record.fields[originalFieldName]
+    const values = orderedFieldNames.map((fieldName) => {
+      const rawValue = record.fields[fieldName]
+      const cleanValue = extractCompleteFieldValue(rawValue, fieldName)
 
-        try {
-          // 🔥 USE ENHANCED EXTRACTION - PRESERVE EVERYTHING
-          const extractedValue = extractCompleteFieldValue(rawValue, originalFieldName)
-
-          // Track extraction success
-          if (rawValue !== null && rawValue !== undefined) {
-            totalPreservedValues++
-          }
-
-          // 🔥 ALWAYS PRESERVE SOMETHING - never return empty
-          if (extractedValue && extractedValue.trim() !== "") {
-            fieldStats[originalFieldName].extractedValues++
-            totalExtractedValues++
-
-            // 🔥 PROPER CSV ESCAPING - PRESERVE ALL DATA
-            const escapedValue = extractedValue
-              .replace(/"/g, '""') // Escape quotes
-              .replace(/\r?\n/g, " ") // Replace newlines with spaces
-              .trim()
-
-            return `"${escapedValue}"`
-          }
-
-          // 🔥 EVEN "EMPTY" VALUES GET PRESERVED WITH TYPE INFO
-          return `"EMPTY_FIELD"`
-        } catch (error) {
-          extractionErrors++
-          console.error(`❌ Extraction error for record ${recordIndex + 1}, field "${originalFieldName}":`, error)
-
-          // 🔥 EMERGENCY ABSOLUTE PRESERVATION
-          const emergencyValue = String(rawValue).substring(0, 200).replace(/"/g, '""')
-          return `"EMERGENCY_PRESERVED:${emergencyValue}"`
-        }
-      }),
-    ]
+      if (cleanValue && cleanValue.trim() !== "") {
+        totalExtractedValues++
+        // Proper CSV escaping
+        const escapedValue = cleanValue
+          .replace(/"/g, '""') // Escape quotes
+          .replace(/\r?\n/g, " ") // Replace newlines with spaces
+          .trim()
+        return `"${escapedValue}"`
+      } else {
+        totalEmptyValues++
+        return '""' // Empty cell
+      }
+    })
 
     return values.join(",")
   })
 
   const csvContent = [csvHeaders, ...csvRows].join("\n")
 
-  // 🔍 STEP 5: Comprehensive data integrity validation
-  const originalDataSize = JSON.stringify(data).length
-  const csvSize = csvContent.length
-  const compressionRatio = Math.round((1 - csvSize / originalDataSize) * 100)
+  // Calculate stats
+  const totalCells = data.length * orderedFieldNames.length
+  const dataFillRate = totalCells > 0 ? ((totalExtractedValues / totalCells) * 100).toFixed(1) : "0"
 
-  // 🔥 FIXED: More accurate preservation rate calculation
-  const totalFieldsWithData = data.reduce((count, record) => {
-    return (
-      count +
-      Object.values(record.fields).filter((value) => value !== null && value !== undefined && value !== "").length
-    )
-  }, 0)
-
-  const dataPreservationRate =
-    totalFieldsWithData > 0 ? ((totalExtractedValues / totalFieldsWithData) * 100).toFixed(1) : "100.0"
-
-  // 🔍 STEP 6: Create comprehensive conversion report
-  const extractionSuccessRate =
-    totalPreservedValues > 0 ? ((totalExtractedValues / totalPreservedValues) * 100).toFixed(1) : "100.0"
   const conversionReport = `
-📊 ZERO DATA LOSS CSV CONVERSION REPORT (FIELD ORDER FIXED):
+📊 CLEAN CSV CONVERSION REPORT:
   ✅ Total records: ${data.length}
   ✅ Total fields: ${orderedFieldNames.length}
-  ✅ Clean field names: ${cleanFieldNames.length}
-  ✅ CSV size: ${csvSize} characters
-  ✅ Estimated tokens: ${estimateTokens(csvContent)}
-  ✅ Compression ratio: ${compressionRatio}% smaller than JSON
+  ✅ CSV size: ${csvContent.length} characters
+  ✅ Data fill rate: ${dataFillRate}%
+  ✅ Extracted values: ${totalExtractedValues}
+  ✅ Empty cells: ${totalEmptyValues}
   
-🔍 DATA PRESERVATION METRICS:
-  📊 Total possible values: ${data.length * orderedFieldNames.length}
-  ✅ Values preserved: ${totalPreservedValues} (${dataPreservationRate}%)
-  ✅ Values extracted: ${totalExtractedValues} (${extractionSuccessRate}% of preserved)
-  ❌ Extraction errors: ${extractionErrors}
-  
-🔧 FIELD ORDER PRESERVATION:
-  📋 Field order source: ${fieldMetadata ? "Metadata (correct order)" : "Data analysis (may be incorrect)"}
-  ✅ Fields processed in order: ${orderedFieldNames.slice(0, 3).join(", ")}${orderedFieldNames.length > 3 ? "..." : ""}
-  🎯 Order consistency: ${fieldMetadata ? "✅ Guaranteed correct" : "⚠️ Best effort from data"}
-  
-📋 Field Extraction Quality (in correct order):
-${orderedFieldNames
-  .slice(0, 10)
-  .map((fieldName, index) => {
-    const stats = fieldStats[fieldName]
-    const preservationRate = ((stats.preservedValues / stats.totalValues) * 100).toFixed(1)
-    const extractionRate =
-      stats.preservedValues > 0 ? ((stats.extractedValues / stats.preservedValues) * 100).toFixed(1) : "0"
-    return `  ${index + 1}. "${fieldNameMapping[fieldName]}": ${preservationRate}% preserved, ${extractionRate}% extracted`
-  })
-  .join("\n")}
-${orderedFieldNames.length > 10 ? `  ... and ${orderedFieldNames.length - 10} more fields` : ""}
-
-🎯 ZERO DATA LOSS + FIELD ORDER GUARANTEE:
-  ${dataPreservationRate === "100.0" ? "✅ PERFECT: No data loss detected" : `⚠️ WARNING: ${100 - Number.parseFloat(dataPreservationRate)}% data loss detected`}
-  ${extractionErrors === 0 ? "✅ PERFECT: No extraction errors" : `⚠️ WARNING: ${extractionErrors} extraction errors`}
-  ${Number.parseFloat(extractionSuccessRate) >= 95 ? "✅ EXCELLENT: High extraction success rate" : `⚠️ WARNING: Low extraction success rate`}
-  ${fieldMetadata ? "✅ PERFECT: Field order preserved from metadata" : "⚠️ WARNING: Field order may be incorrect (no metadata)"}
+🎯 CSV FORMAT:
+  ✅ Standard CSV format (no metadata)
+  ✅ Clean field names
+  ✅ Only actual values in cells
+  ✅ Proper escaping for special characters
+  ✅ Empty cells for null/undefined values
   `
 
-  console.log(`✅ ===== ZERO DATA LOSS CSV CONVERSION COMPLETE (FIELD ORDER FIXED) =====`)
-  console.log(`📊 Records: ${data.length}`)
-  console.log(`📋 Fields: ${orderedFieldNames.length} (in correct order)`)
-  console.log(`📄 CSV size: ${csvSize} characters`)
-  console.log(`🎯 Estimated tokens: ${estimateTokens(csvContent)}`)
-  console.log(`🔍 Data preservation rate: ${dataPreservationRate}%`)
-  console.log(`🔍 Extraction success rate: ${extractionSuccessRate}%`)
-  console.log(`🔧 Field order: ${fieldMetadata ? "✅ Preserved from metadata" : "⚠️ Best effort from data"}`)
-  console.log(
-    `${Number.parseFloat(dataPreservationRate) === 100 && extractionErrors === 0 && fieldMetadata ? "🎉 PERFECT: ZERO DATA LOSS + CORRECT FIELD ORDER!" : "⚠️ ISSUES DETECTED - REVIEW REQUIRED"}`,
-  )
-  console.log(`===============================================`)
+  console.log(`✅ Clean CSV conversion complete:`)
+  console.log(`  📊 Records: ${data.length}`)
+  console.log(`  📋 Fields: ${orderedFieldNames.length}`)
+  console.log(`  📄 CSV size: ${csvContent.length} characters`)
+  console.log(`  📈 Data fill rate: ${dataFillRate}%`)
 
   return {
     csvContent,
@@ -571,18 +236,13 @@ ${orderedFieldNames.length > 10 ? `  ... and ${orderedFieldNames.length - 10} mo
     stats: {
       totalRecords: data.length,
       totalFields: orderedFieldNames.length,
-      totalPossibleValues: data.length * orderedFieldNames.length,
-      totalPreservedValues,
       totalExtractedValues,
-      extractionErrors,
-      dataPreservationRate: Number.parseFloat(dataPreservationRate),
-      extractionSuccessRate: Number.parseFloat(extractionSuccessRate),
-      csvSize,
-      estimatedTokens: estimateTokens(csvContent),
-      fieldStats,
-      fieldNameMapping,
+      totalEmptyValues,
+      dataFillRate: Number.parseFloat(dataFillRate),
+      csvSize: csvContent.length,
       fieldOrderPreserved: !!fieldMetadata,
       orderedFieldNames,
+      cleanFieldNames,
     },
   }
 }
