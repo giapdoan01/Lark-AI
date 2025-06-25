@@ -18,6 +18,44 @@ const estimateTokens = (text: string): number => {
   return Math.ceil(text.length / 4)
 }
 
+// Thêm function test single chunk trước khi chạy pipeline
+const testSingleChunk = async (chunk: any[], keyIndex: number): Promise<boolean> => {
+  try {
+    const apiKey = API_KEYS[keyIndex]
+    const chunkText = JSON.stringify(chunk, null, 1)
+    const estimatedTokens = estimateTokens(chunkText)
+
+    console.log(`🧪 Test chunk: ${chunk.length} records, ~${estimatedTokens} tokens`)
+
+    if (estimatedTokens > 30000) {
+      console.log(`⚠️ Chunk quá lớn (${estimatedTokens} tokens), cần chia nhỏ hơn`)
+      return false
+    }
+
+    const groq = createGroqClient(apiKey)
+
+    // Test với prompt đơn giản
+    const testCompletion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "user",
+          content: "Test: Return 'OK'",
+        },
+      ],
+      temperature: 0.1,
+      max_tokens: 10,
+    })
+
+    const response = testCompletion?.choices?.[0]?.message?.content
+    console.log(`✅ Key ${keyIndex + 1} test OK: ${response}`)
+    return true
+  } catch (error) {
+    console.log(`❌ Key ${keyIndex + 1} test failed: ${error}`)
+    return false
+  }
+}
+
 // Function chia dữ liệu theo token limit
 const chunkDataByTokens = (data: any[], maxTokensPerChunk = 10000): any[][] => {
   const chunks: any[][] = []
@@ -33,6 +71,11 @@ const chunkDataByTokens = (data: any[], maxTokensPerChunk = 10000): any[][] => {
     // Log record đầu tiên để debug
     if (currentChunk.length === 0 && chunks.length === 0) {
       console.log(`📊 Sample record tokens: ${recordTokens} (${recordText.length} chars)`)
+
+      // Nếu 1 record đã quá lớn, cảnh báo
+      if (recordTokens > maxTokensPerChunk) {
+        console.warn(`⚠️ Single record quá lớn: ${recordTokens} tokens > ${maxTokensPerChunk} limit`)
+      }
     }
 
     // Nếu thêm record này vào chunk hiện tại sẽ vượt quá limit
@@ -54,6 +97,16 @@ const chunkDataByTokens = (data: any[], maxTokensPerChunk = 10000): any[][] => {
   }
 
   console.log(`📊 Kết quả chia: ${chunks.length} chunks từ ${data.length} records`)
+
+  // Nếu chỉ có 1 chunk và quá lớn, thử chia nhỏ hơn
+  if (chunks.length === 1) {
+    const singleChunkTokens = estimateTokens(JSON.stringify(chunks[0], null, 1))
+    if (singleChunkTokens > 15000) {
+      console.log(`⚠️ Single chunk quá lớn (${singleChunkTokens} tokens), thử chia nhỏ hơn...`)
+      return chunkDataByTokens(data, Math.floor(maxTokensPerChunk / 2)) // Chia đôi
+    }
+  }
+
   return chunks
 }
 
@@ -207,9 +260,36 @@ export const preprocessDataWithPipeline = async (
       throw new Error("Không có API keys hợp lệ")
     }
 
-    // BƯỚC 1: Chia dữ liệu thành chunks theo token limit (giảm xuống 10K)
+    // Test API keys trước
+    console.log(`🧪 Test API keys trước khi bắt đầu...`)
+    const keyTests = await Promise.all(API_KEYS.slice(0, 3).map((key, index) => testSingleChunk([data[0]], index)))
+    const workingKeys = keyTests.filter(Boolean).length
+    console.log(`🔑 ${workingKeys}/${keyTests.length} keys hoạt động`)
+
+    if (workingKeys === 0) {
+      throw new Error("Không có API keys nào hoạt động")
+    }
+
+    // BƯỚC 1: Chia dữ liệu thành chunks theo token limit
     console.log(`📊 BƯỚC 1: Chia dữ liệu theo token limit (10000 tokens/chunk)`)
-    const chunks = chunkDataByTokens(data, 10000) // Giảm từ 20000 xuống 10000
+    let chunks = chunkDataByTokens(data, 10000)
+
+    // Nếu vẫn chỉ có 1 chunk lớn, thử strategy khác
+    if (chunks.length === 1) {
+      const singleChunkTokens = estimateTokens(JSON.stringify(chunks[0], null, 1))
+      console.log(`⚠️ Chỉ có 1 chunk với ${singleChunkTokens} tokens`)
+
+      if (singleChunkTokens > 20000) {
+        console.log(`🔄 Fallback: Chia theo số records thay vì tokens`)
+        // Chia theo số records
+        const recordsPerChunk = Math.ceil(data.length / Math.max(API_KEYS.length - 1, 2))
+        chunks = []
+        for (let i = 0; i < data.length; i += recordsPerChunk) {
+          chunks.push(data.slice(i, i + recordsPerChunk))
+        }
+        console.log(`📊 Fallback result: ${chunks.length} chunks với ${recordsPerChunk} records/chunk`)
+      }
+    }
 
     // Log thông tin chi tiết về chunks
     chunks.forEach((chunk, index) => {
@@ -218,19 +298,42 @@ export const preprocessDataWithPipeline = async (
       console.log(`📊 Chunk ${index + 1}: ${chunk.length} records, ~${estimatedTokens} tokens`)
     })
 
-    console.log(`📊 Tổng cộng: ${data.length} records → ${chunks.length} chunks (tối ưu theo 10000 tokens)`)
+    // BƯỚC 2: Optimize từng chunk với better error handling
+    console.log(`⏳ BƯỚC 2: Đang optimize ${chunks.length} chunks...`)
 
-    // BƯỚC 2: Optimize từng chunk song song với better error handling
-    const optimizePromises = chunks.map((chunk, index) => {
-      const keyIndex = index % (API_KEYS.length - 1) // Giữ lại key cuối cho phân tích
-      const apiKey = API_KEYS[keyIndex]
+    const optimizeResults = []
 
-      console.log(`🔧 Chuẩn bị optimize chunk ${index + 1} với key ${keyIndex + 1}`)
-      return optimizeDataChunk(apiKey, keyIndex, chunk, index, chunks.length)
-    })
+    // Xử lý từng chunk một để debug tốt hơn
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]
+      const keyIndex = i % (API_KEYS.length - 1)
 
-    console.log(`⏳ BƯỚC 2: Đang optimize ${chunks.length} chunks song song...`)
-    const optimizeResults = await Promise.all(optimizePromises)
+      console.log(`🔧 Xử lý chunk ${i + 1}/${chunks.length} với key ${keyIndex + 1}`)
+
+      try {
+        const result = await optimizeDataChunk(API_KEYS[keyIndex], keyIndex, chunk, i, chunks.length)
+        optimizeResults.push(result)
+
+        if (result.success) {
+          console.log(`✅ Chunk ${i + 1}: Thành công`)
+        } else {
+          console.log(`❌ Chunk ${i + 1}: Thất bại - ${result.error}`)
+        }
+      } catch (error) {
+        console.log(`❌ Chunk ${i + 1}: Exception - ${error}`)
+        optimizeResults.push({
+          success: false,
+          optimizedData: "",
+          keyIndex: keyIndex,
+          error: String(error),
+        })
+      }
+
+      // Delay giữa các requests
+      if (i < chunks.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
+    }
 
     // Debug chi tiết kết quả
     console.log(`🔍 DEBUG: Optimize results details:`)
@@ -248,21 +351,31 @@ export const preprocessDataWithPipeline = async (
 
     console.log(`📊 Optimize results: ${successfulOptimizes.length}/${optimizeResults.length} thành công`)
 
-    // Nếu có ít nhất 1 chunk thành công, tiếp tục
-    if (!successfulOptimizes || successfulOptimizes.length === 0) {
-      // Log chi tiết lỗi
-      console.error(`❌ Chi tiết lỗi optimize:`)
-      failedOptimizes.forEach((result, index) => {
-        console.error(`  Chunk ${index + 1}: ${result.error}`)
-      })
-      throw new Error(`Tất cả ${optimizeResults.length} optimize requests đều thất bại`)
-    }
+    // Nếu tất cả thất bại, thử fallback với raw data
+    if (successfulOptimizes.length === 0) {
+      console.log(`🔄 FALLBACK: Tất cả optimize thất bại, sử dụng raw data`)
 
-    // Cảnh báo nếu có chunks thất bại
-    if (failedOptimizes.length > 0) {
-      console.warn(
-        `⚠️ ${failedOptimizes.length} chunks thất bại, tiếp tục với ${successfulOptimizes.length} chunks thành công`,
-      )
+      // Sử dụng raw data (rút gọn)
+      const rawData = JSON.stringify(data.slice(0, 20), null, 1) // Chỉ lấy 20 records đầu
+
+      const keyUsage = {
+        totalKeys: API_KEYS.length,
+        optimizeKeys: 0,
+        analysisKey: 1,
+        failedKeys: failedOptimizes.length,
+        successRate: "0%",
+        chunks: chunks.length,
+        successfulChunks: 0,
+        finalDataSize: rawData.length,
+        fallback: true,
+      }
+
+      return {
+        success: true,
+        optimizedData: rawData,
+        analysis: `⚠️ Không thể optimize dữ liệu, sử dụng ${data.slice(0, 20).length} records đầu tiên từ tổng ${data.length} records. Dữ liệu vẫn có thể được phân tích nhưng có thể không đầy đủ.`,
+        keyUsage: keyUsage,
+      }
     }
 
     // BƯỚC 3: Gộp dữ liệu đã optimize
