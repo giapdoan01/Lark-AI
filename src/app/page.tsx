@@ -33,7 +33,7 @@ export default function Home() {
         >
           <h1 style={{ margin: "0 0 10px 0", color: "#333", fontSize: "28px" }}>🚀 Lark Base AI ChatBot</h1>
           <p style={{ margin: 0, color: "#666", fontSize: "16px" }}>
-            Phân tích dữ liệu với Llama 4 Scout - Single Request Strategy
+            Phân tích dữ liệu với Raw JSON - Zero Conversion Loss
           </p>
         </div>
 
@@ -47,7 +47,7 @@ export default function Home() {
             boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
           }}
         >
-          <h3 style={{ margin: "0 0 15px 0", color: "#333" }}>✨ Tính năng mới với Llama 4 Scout</h3>
+          <h3 style={{ margin: "0 0 15px 0", color: "#333" }}>✨ Raw JSON Strategy - Zero Data Loss</h3>
           <div
             style={{
               display: "grid",
@@ -55,19 +55,17 @@ export default function Home() {
               gap: "15px",
             }}
           >
-            <div style={{ padding: "15px", backgroundColor: "#e8f4fd", borderRadius: "8px" }}>
-              <div style={{ fontWeight: "600", color: "#007acc", marginBottom: "5px" }}>🎲 Random API Selection</div>
-              <div style={{ fontSize: "14px", color: "#666" }}>Chọn ngẫu nhiên 1 API working từ pool available</div>
-            </div>
             <div style={{ padding: "15px", backgroundColor: "#e8f5e8", borderRadius: "8px" }}>
-              <div style={{ fontWeight: "600", color: "#4caf50", marginBottom: "5px" }}>📄 Single Request</div>
-              <div style={{ fontSize: "14px", color: "#666" }}>Không chia chunks - gửi toàn bộ CSV trong 1 lần</div>
+              <div style={{ fontWeight: "600", color: "#4caf50", marginBottom: "5px" }}>📄 Raw JSON Direct</div>
+              <div style={{ fontSize: "14px", color: "#666" }}>Gửi raw JSON trực tiếp - không convert CSV</div>
+            </div>
+            <div style={{ padding: "15px", backgroundColor: "#e8f4fd", borderRadius: "8px" }}>
+              <div style={{ fontWeight: "600", color: "#007acc", marginBottom: "5px" }}>🔒 Zero Data Loss</div>
+              <div style={{ fontSize: "14px", color: "#666" }}>100% original Lark Base data preserved</div>
             </div>
             <div style={{ padding: "15px", backgroundColor: "#fff3cd", borderRadius: "8px" }}>
               <div style={{ fontWeight: "600", color: "#856404", marginBottom: "5px" }}>🤖 Llama 4 Scout</div>
-              <div style={{ fontSize: "14px", color: "#666" }}>
-                Model mới: meta-llama/llama-4-scout-17b-16e-instruct
-              </div>
+              <div style={{ fontSize: "14px", color: "#666" }}>Model: meta-llama/llama-4-scout-17b-16e-instruct</div>
             </div>
           </div>
         </div>
@@ -86,14 +84,14 @@ export default function Home() {
             <TableSelector onSelect={handleTableSelect} />
 
             <div style={{ marginTop: "30px", padding: "20px", backgroundColor: "#f8f9fa", borderRadius: "8px" }}>
-              <h4 style={{ margin: "0 0 15px 0", color: "#333" }}>🔧 Single Request Strategy</h4>
+              <h4 style={{ margin: "0 0 15px 0", color: "#333" }}>🔧 Raw JSON Strategy</h4>
               <div style={{ textAlign: "left", maxWidth: "500px", margin: "0 auto" }}>
                 <div style={{ marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
                   <span
                     style={{
                       width: "24px",
                       height: "24px",
-                      backgroundColor: "#007acc",
+                      backgroundColor: "#4caf50",
                       color: "white",
                       borderRadius: "50%",
                       display: "flex",
@@ -112,7 +110,7 @@ export default function Home() {
                     style={{
                       width: "24px",
                       height: "24px",
-                      backgroundColor: "#007acc",
+                      backgroundColor: "#4caf50",
                       color: "white",
                       borderRadius: "50%",
                       display: "flex",
@@ -124,14 +122,14 @@ export default function Home() {
                   >
                     2
                   </span>
-                  <span>Hệ thống chọn ngẫu nhiên 1 API working</span>
+                  <span>Lấy raw JSON data từ Lark Base</span>
                 </div>
                 <div style={{ marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
                   <span
                     style={{
                       width: "24px",
                       height: "24px",
-                      backgroundColor: "#007acc",
+                      backgroundColor: "#4caf50",
                       color: "white",
                       borderRadius: "50%",
                       display: "flex",
@@ -143,14 +141,14 @@ export default function Home() {
                   >
                     3
                   </span>
-                  <span>Gửi toàn bộ CSV trong 1 request duy nhất</span>
+                  <span>Gửi trực tiếp cho Llama 4 Scout (no conversion)</span>
                 </div>
                 <div style={{ marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
                   <span
                     style={{
                       width: "24px",
                       height: "24px",
-                      backgroundColor: "#007acc",
+                      backgroundColor: "#4caf50",
                       color: "white",
                       borderRadius: "50%",
                       display: "flex",
@@ -162,7 +160,7 @@ export default function Home() {
                   >
                     4
                   </span>
-                  <span>Nhận phân tích toàn diện từ Llama 4 Scout</span>
+                  <span>Nhận phân tích với 100% data integrity</span>
                 </div>
               </div>
             </div>

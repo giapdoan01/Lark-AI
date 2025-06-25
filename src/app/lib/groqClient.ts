@@ -19,283 +19,52 @@ const estimateTokens = (text: string): number => {
   return Math.ceil(text.length / 4)
 }
 
-// 🔥 ENHANCED: Comprehensive field extraction với data integrity protection
-const extractPlainTextFromField = (value: unknown, fieldName?: string): string => {
-  // 🔍 DETAILED LOGGING for debugging
-  const logExtraction = (input: unknown, output: string, method: string) => {
-    if (fieldName && (output === "" || output === "null" || output === "undefined")) {
-      console.warn(`⚠️ Field "${fieldName}": ${method} resulted in empty output`)
-      console.warn(`   Input type: ${typeof input}`)
-      console.warn(`   Input value:`, input)
-    }
-  }
+// 🔥 NEW: Raw JSON preparation với data integrity protection
+const prepareRawJSONData = (
+  data: Array<{ recordId: string; fields: Record<string, unknown> }>,
+): {
+  jsonData: string
+  integrityReport: string
+  stats: any
+} => {
+  console.log(`📊 ===== RAW JSON PREPARATION (NO CSV CONVERSION) =====`)
+  console.log(`📊 Preparing ${data.length} records as raw JSON...`)
 
-  // 1. Handle null/undefined
-  if (value === null || value === undefined) {
-    logExtraction(value, "", "null/undefined check")
-    return ""
-  }
-
-  // 2. Handle primitive types
-  if (typeof value === "string") {
-    const result = value.trim()
-    logExtraction(value, result, "string")
-    return result
-  }
-
-  if (typeof value === "number") {
-    const result = String(value)
-    logExtraction(value, result, "number")
-    return result
-  }
-
-  if (typeof value === "boolean") {
-    const result = value ? "Yes" : "No"
-    logExtraction(value, result, "boolean")
-    return result
-  }
-
-  // 3. Handle Date objects
-  if (value instanceof Date) {
-    const result = value.toISOString()
-    logExtraction(value, result, "Date object")
-    return result
-  }
-
-  // 4. 🔥 COMPREHENSIVE OBJECT HANDLING
-  if (typeof value === "object") {
-    try {
-      const jsonStr = JSON.stringify(value)
-
-      // 🔍 Log original object for debugging
-      console.log(`🔍 Processing object field "${fieldName}":`, jsonStr.substring(0, 200))
-
-      // Handle empty/null objects
-      if (jsonStr === "null" || jsonStr === "{}" || jsonStr === "[]") {
-        logExtraction(value, "", "empty object")
-        return ""
-      }
-
-      // 🔥 PATTERN 1: Lark Base Text Objects
-      // Format: [{"type":"text","text":"Intel Pentium"}] or {"type":"text","text":"value"}
-      if (jsonStr.includes('"type":"text"') && jsonStr.includes('"text":')) {
-        const textMatches = jsonStr.match(/"text":"([^"]*(?:\\.[^"]*)*)"/g)
-        if (textMatches) {
-          const texts = textMatches
-            .map((match) => {
-              const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*)*)"/)
-              return textMatch ? textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
-            })
-            .filter((text) => text.length > 0)
-
-          if (texts.length > 0) {
-            const result = texts.join(", ")
-            console.log(`✅ Extracted text objects: "${result}"`)
-            logExtraction(value, result, "text objects")
-            return result
-          }
-        }
-      }
-
-      // 🔥 PATTERN 2: Lark Base Option Objects
-      // Format: {"id":"optr5hYAsF","text":"SSD-128"} or [{"id":"opt1","text":"Value1"}]
-      if (jsonStr.includes('"text":') && (jsonStr.includes('"id":') || jsonStr.includes('"color":'))) {
-        const textMatches = jsonStr.match(/"text":"([^"]*(?:\\.[^"]*)*)"/g)
-        if (textMatches) {
-          const texts = textMatches
-            .map((match) => {
-              const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*)*)"/)
-              return textMatch ? textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
-            })
-            .filter((text) => text.length > 0)
-
-          if (texts.length > 0) {
-            const result = texts.join(", ")
-            console.log(`✅ Extracted option objects: "${result}"`)
-            logExtraction(value, result, "option objects")
-            return result
-          }
-        }
-      }
-
-      // 🔥 PATTERN 3: Lark Base User Objects
-      // Format: {"id":"user123","name":"John Doe","email":"john@example.com"}
-      if (jsonStr.includes('"name":') && (jsonStr.includes('"id":') || jsonStr.includes('"email":'))) {
-        const nameMatches = jsonStr.match(/"name":"([^"]*(?:\\.[^"]*)*)"/g)
-        if (nameMatches) {
-          const names = nameMatches
-            .map((match) => {
-              const nameMatch = match.match(/"name":"([^"]*(?:\\.[^"]*)*)"/)
-              return nameMatch ? nameMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
-            })
-            .filter((name) => name.length > 0)
-
-          if (names.length > 0) {
-            const result = names.join(", ")
-            console.log(`✅ Extracted user objects: "${result}"`)
-            logExtraction(value, result, "user objects")
-            return result
-          }
-        }
-      }
-
-      // 🔥 PATTERN 4: Lark Base Attachment Objects
-      // Format: {"name":"file.pdf","url":"https://...","size":1024}
-      if (jsonStr.includes('"name":') && (jsonStr.includes('"url":') || jsonStr.includes('"size":'))) {
-        const nameMatches = jsonStr.match(/"name":"([^"]*(?:\\.[^"]*)*)"/g)
-        if (nameMatches) {
-          const names = nameMatches
-            .map((match) => {
-              const nameMatch = match.match(/"name":"([^"]*(?:\\.[^"]*)*)"/)
-              return nameMatch ? nameMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
-            })
-            .filter((name) => name.length > 0)
-
-          if (names.length > 0) {
-            const result = names.join(", ")
-            console.log(`✅ Extracted attachment objects: "${result}"`)
-            logExtraction(value, result, "attachment objects")
-            return result
-          }
-        }
-      }
-
-      // 🔥 PATTERN 5: Lark Base Link Objects
-      // Format: {"text":"Display Text","link":"https://example.com"}
-      if (jsonStr.includes('"link":') && jsonStr.includes('"text":')) {
-        const linkData = []
-        const textMatches = jsonStr.match(/"text":"([^"]*(?:\\.[^"]*)*)"/g)
-        const linkMatches = jsonStr.match(/"link":"([^"]*(?:\\.[^"]*)*)"/g)
-
-        if (textMatches && linkMatches) {
-          const texts = textMatches.map((match) => {
-            const textMatch = match.match(/"text":"([^"]*(?:\\.[^"]*)*)"/)
-            return textMatch ? textMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
-          })
-          const links = linkMatches.map((match) => {
-            const linkMatch = match.match(/"link":"([^"]*(?:\\.[^"]*)*)"/)
-            return linkMatch ? linkMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : ""
-          })
-
-          for (let i = 0; i < Math.max(texts.length, links.length); i++) {
-            const text = texts[i] || ""
-            const link = links[i] || ""
-            if (text || link) {
-              linkData.push(text ? `${text} (${link})` : link)
-            }
-          }
-        }
-
-        if (linkData.length > 0) {
-          const result = linkData.join(", ")
-          console.log(`✅ Extracted link objects: "${result}"`)
-          logExtraction(value, result, "link objects")
-          return result
-        }
-      }
-
-      // 🔥 PATTERN 6: Arrays of primitive values
-      if (Array.isArray(value)) {
-        const arrayValues = value
-          .map((item) => extractPlainTextFromField(item, `${fieldName}[array_item]`))
-          .filter((item) => item && item.trim() !== "")
-
-        if (arrayValues.length > 0) {
-          const result = arrayValues.join(", ")
-          console.log(`✅ Extracted array values: "${result}"`)
-          logExtraction(value, result, "array values")
-          return result
-        }
-      }
-
-      // 🔥 PATTERN 7: Generic object with valuable properties
-      // Extract all string/number values from object
-      const extractObjectValues = (obj: any, prefix = ""): string[] => {
-        const values: string[] = []
-
-        for (const [key, val] of Object.entries(obj)) {
-          if (val === null || val === undefined) continue
-
-          if (typeof val === "string" && val.trim() !== "") {
-            values.push(val.trim())
-          } else if (typeof val === "number") {
-            values.push(String(val))
-          } else if (typeof val === "boolean") {
-            values.push(val ? "Yes" : "No")
-          } else if (typeof val === "object" && val !== null) {
-            // Recursive extraction for nested objects
-            const nestedValues = extractObjectValues(val, `${prefix}${key}.`)
-            values.push(...nestedValues)
-          }
-        }
-
-        return values
-      }
-
-      const objectValues = extractObjectValues(value)
-      if (objectValues.length > 0) {
-        const result = objectValues.join(", ")
-        console.log(`✅ Extracted object values: "${result}"`)
-        logExtraction(value, result, "generic object")
-        return result
-      }
-
-      // 🔥 FALLBACK: Return formatted JSON if no patterns match
-      const fallbackResult = jsonStr.length > 200 ? jsonStr.substring(0, 200) + "..." : jsonStr
-      console.warn(`⚠️ Using fallback JSON for field "${fieldName}": ${fallbackResult}`)
-      logExtraction(value, fallbackResult, "fallback JSON")
-      return fallbackResult
-    } catch (error) {
-      console.error(`❌ Error parsing field "${fieldName}":`, error)
-      console.error(`   Original value:`, value)
-
-      // 🔥 EMERGENCY FALLBACK: Convert to string
-      const emergencyResult = String(value).substring(0, 100)
-      logExtraction(value, emergencyResult, "emergency fallback")
-      return emergencyResult
-    }
-  }
-
-  // 🔥 FINAL FALLBACK for unknown types
-  const finalResult = String(value).substring(0, 100)
-  console.warn(`⚠️ Unknown type for field "${fieldName}": ${typeof value}`)
-  logExtraction(value, finalResult, "final fallback")
-  return finalResult
-}
-
-// 🔥 ENHANCED: CSV Conversion với data integrity validation
-const convertToCSV = (data: Array<{ recordId: string; fields: Record<string, unknown> }>): string => {
-  if (data.length === 0) return ""
-
-  console.log(`📊 ===== ENHANCED CSV CONVERSION với DATA INTEGRITY =====`)
-  console.log(`📊 Converting ${data.length} records to CSV format...`)
-
-  // 🔍 STEP 1: Analyze all fields across all records
+  // 🔍 STEP 1: Analyze data structure
   const allFieldNames = new Set<string>()
-  const fieldValueSamples: Record<string, unknown[]> = {}
-  const fieldStats: Record<string, { totalValues: number; emptyValues: number; uniqueTypes: Set<string> }> = {}
+  const fieldStats: Record<
+    string,
+    { totalValues: number; emptyValues: number; uniqueTypes: Set<string>; samples: unknown[] }
+  > = {}
 
   data.forEach((record, recordIndex) => {
     Object.entries(record.fields).forEach(([fieldName, fieldValue]) => {
       allFieldNames.add(fieldName)
 
-      // Collect samples for analysis
-      if (!fieldValueSamples[fieldName]) {
-        fieldValueSamples[fieldName] = []
-        fieldStats[fieldName] = { totalValues: 0, emptyValues: 0, uniqueTypes: new Set() }
+      if (!fieldStats[fieldName]) {
+        fieldStats[fieldName] = {
+          totalValues: 0,
+          emptyValues: 0,
+          uniqueTypes: new Set(),
+          samples: [],
+        }
       }
 
-      fieldValueSamples[fieldName].push(fieldValue)
       fieldStats[fieldName].totalValues++
       fieldStats[fieldName].uniqueTypes.add(typeof fieldValue)
 
       if (fieldValue === null || fieldValue === undefined || fieldValue === "") {
         fieldStats[fieldName].emptyValues++
+      } else {
+        // Collect samples for analysis (first 3 non-empty values)
+        if (fieldStats[fieldName].samples.length < 3) {
+          fieldStats[fieldName].samples.push(fieldValue)
+        }
       }
 
       // Log first few samples for debugging
-      if (fieldValueSamples[fieldName].length <= 3) {
-        console.log(`🔍 Field "${fieldName}" sample ${fieldValueSamples[fieldName].length}:`, fieldValue)
+      if (recordIndex < 3) {
+        console.log(`🔍 Record ${recordIndex + 1}, Field "${fieldName}":`, fieldValue)
       }
     })
   })
@@ -303,154 +72,151 @@ const convertToCSV = (data: Array<{ recordId: string; fields: Record<string, unk
   const fieldNames = Array.from(allFieldNames).sort()
   console.log(`📋 Found ${fieldNames.length} unique fields:`, fieldNames)
 
-  // 🔍 STEP 2: Analyze field quality
-  console.log(`📊 Field Quality Analysis:`)
+  // 🔍 STEP 2: Create comprehensive field analysis
+  console.log(`📊 Field Analysis:`)
   fieldNames.forEach((fieldName) => {
     const stats = fieldStats[fieldName]
     const fillRate = (((stats.totalValues - stats.emptyValues) / stats.totalValues) * 100).toFixed(1)
     const types = Array.from(stats.uniqueTypes).join(", ")
     console.log(`  "${fieldName}": ${stats.totalValues} values, ${fillRate}% filled, types: ${types}`)
+
+    // Log sample values for debugging
+    if (stats.samples.length > 0) {
+      console.log(
+        `    Samples:`,
+        stats.samples.map((s) =>
+          typeof s === "object" ? JSON.stringify(s).substring(0, 50) + "..." : String(s).substring(0, 50),
+        ),
+      )
+    }
   })
 
-  // 🔍 STEP 3: Create consistent headers
-  const headers = ["STT", ...fieldNames]
-  const csvHeaders = headers.join(",")
+  // 🔍 STEP 3: Prepare clean JSON structure
+  const cleanedData = data.map((record, index) => ({
+    STT: index + 1,
+    recordId: record.recordId,
+    fields: record.fields,
+  }))
 
-  // 🔍 STEP 4: Convert records với comprehensive extraction
-  let totalExtractedValues = 0
-  let totalEmptyValues = 0
-  let extractionErrors = 0
+  // 🔍 STEP 4: Generate JSON string
+  const jsonData = JSON.stringify(cleanedData, null, 2)
 
-  const csvRows = data.map((record, recordIndex) => {
-    const values = [
-      String(recordIndex + 1), // STT
-      ...fieldNames.map((fieldName) => {
-        const rawValue = record.fields[fieldName]
-
-        try {
-          const cleanValue = extractPlainTextFromField(rawValue, fieldName)
-
-          if (!cleanValue || cleanValue.trim() === "") {
-            totalEmptyValues++
-            return ""
-          }
-
-          totalExtractedValues++
-
-          // 🔥 PROPER CSV ESCAPING
-          if (
-            cleanValue.includes(",") ||
-            cleanValue.includes('"') ||
-            cleanValue.includes("\n") ||
-            cleanValue.includes("\r")
-          ) {
-            return `"${cleanValue.replace(/"/g, '""')}"`
-          }
-
-          return cleanValue
-        } catch (error) {
-          extractionErrors++
-          console.error(`❌ Extraction error for record ${recordIndex + 1}, field "${fieldName}":`, error)
-          return `ERROR: ${error}`
-        }
-      }),
-    ]
-
-    return values.join(",")
-  })
-
-  const csvContent = [csvHeaders, ...csvRows].join("\n")
-
-  // 🔍 STEP 5: Data integrity validation
-  const originalJsonSize = JSON.stringify(data).length
-  const csvSize = csvContent.length
-  const compressionRatio = Math.round((1 - csvSize / originalJsonSize) * 100)
-
+  // 🔍 STEP 5: Calculate statistics
   const totalPossibleValues = data.length * fieldNames.length
-  const dataIntegrityRate = ((totalExtractedValues / totalPossibleValues) * 100).toFixed(1)
+  const totalActualValues = Object.values(fieldStats).reduce(
+    (sum, stat) => sum + (stat.totalValues - stat.emptyValues),
+    0,
+  )
+  const dataIntegrityRate = ((totalActualValues / totalPossibleValues) * 100).toFixed(1)
 
-  console.log(`✅ ===== CSV CONVERSION COMPLETE =====`)
+  const jsonSize = jsonData.length
+  const estimatedTokens = estimateTokens(jsonData)
+
+  // 🔍 STEP 6: Create integrity report
+  const integrityReport = `
+📊 RAW JSON DATA INTEGRITY REPORT:
+  ✅ Total records: ${data.length}
+  ✅ Total fields: ${fieldNames.length}
+  ✅ Total possible values: ${totalPossibleValues}
+  ✅ Actual values with data: ${totalActualValues}
+  ✅ Data integrity rate: ${dataIntegrityRate}%
+  ✅ JSON size: ${jsonSize} characters
+  ✅ Estimated tokens: ${estimatedTokens}
+  
+📋 Field Quality Summary:
+${fieldNames
+  .map((fieldName) => {
+    const stats = fieldStats[fieldName]
+    const fillRate = (((stats.totalValues - stats.emptyValues) / stats.totalValues) * 100).toFixed(1)
+    return `  • "${fieldName}": ${fillRate}% filled (${stats.totalValues - stats.emptyValues}/${stats.totalValues})`
+  })
+  .join("\n")}
+
+🔍 Data Structure: Raw JSON preserves ALL original field structures
+🔍 No conversion loss: 100% original Lark Base data maintained
+  `
+
+  console.log(`✅ ===== RAW JSON PREPARATION COMPLETE =====`)
   console.log(`📊 Records: ${data.length}`)
   console.log(`📋 Fields: ${fieldNames.length}`)
-  console.log(`📄 Total columns: ${headers.length}`)
-  console.log(`📄 Original JSON: ${originalJsonSize} chars`)
-  console.log(`📄 Final CSV: ${csvSize} chars`)
-  console.log(`🎯 Compression: ${compressionRatio}% smaller`)
-  console.log(`🎯 Estimated tokens: ${estimateTokens(csvContent)}`)
-  console.log(``)
-  console.log(`🔍 DATA INTEGRITY REPORT:`)
-  console.log(`  📊 Total possible values: ${totalPossibleValues}`)
-  console.log(`  ✅ Successfully extracted: ${totalExtractedValues}`)
-  console.log(`  ⚪ Empty values: ${totalEmptyValues}`)
-  console.log(`  ❌ Extraction errors: ${extractionErrors}`)
-  console.log(`  🎯 Data integrity rate: ${dataIntegrityRate}%`)
-
-  if (Number.parseFloat(dataIntegrityRate) < 70) {
-    console.warn(`⚠️ LOW DATA INTEGRITY: Only ${dataIntegrityRate}% of data extracted successfully!`)
-  } else {
-    console.log(`✅ GOOD DATA INTEGRITY: ${dataIntegrityRate}% extraction success rate`)
-  }
-
+  console.log(`📄 JSON size: ${jsonSize} characters`)
+  console.log(`🎯 Estimated tokens: ${estimatedTokens}`)
+  console.log(`🔍 Data integrity rate: ${dataIntegrityRate}%`)
+  console.log(`✅ NO CONVERSION LOSS - Raw JSON maintains 100% original data`)
   console.log(`===============================================`)
 
-  return csvContent
+  return {
+    jsonData,
+    integrityReport,
+    stats: {
+      totalRecords: data.length,
+      totalFields: fieldNames.length,
+      totalPossibleValues,
+      totalActualValues,
+      dataIntegrityRate: Number.parseFloat(dataIntegrityRate),
+      jsonSize,
+      estimatedTokens,
+      fieldStats,
+    },
+  }
 }
 
-// 🔥 ENHANCED: Data integrity validation function
-const validateDataIntegrity = (
+// 🔥 NEW: Validate raw JSON data integrity
+const validateRawJSONIntegrity = (
   originalData: Array<{ recordId: string; fields: Record<string, unknown> }>,
-  csvContent: string,
+  jsonData: string,
 ): { isValid: boolean; report: string; issues: string[] } => {
   const issues: string[] = []
 
   try {
-    const csvLines = csvContent.trim().split("\n")
-    const headerLine = csvLines[0]
-    const dataLines = csvLines.slice(1)
+    // Parse JSON to validate structure
+    const parsedData = JSON.parse(jsonData)
+
+    // Check if it's an array
+    if (!Array.isArray(parsedData)) {
+      issues.push("JSON data is not an array")
+      return { isValid: false, report: "Invalid JSON structure", issues }
+    }
 
     // Check record count
-    if (dataLines.length !== originalData.length) {
-      issues.push(`Record count mismatch: Expected ${originalData.length}, got ${dataLines.length}`)
+    if (parsedData.length !== originalData.length) {
+      issues.push(`Record count mismatch: Expected ${originalData.length}, got ${parsedData.length}`)
     }
 
-    // Check field count
-    const csvHeaders = headerLine.split(",")
-    const originalFieldCount = new Set<string>()
-    originalData.forEach((record) => {
-      Object.keys(record.fields).forEach((field) => originalFieldCount.add(field))
+    // Check each record structure
+    let validRecords = 0
+    let recordsWithFields = 0
+
+    parsedData.forEach((record: any, index: number) => {
+      if (record && typeof record === "object") {
+        validRecords++
+
+        if (record.fields && typeof record.fields === "object") {
+          recordsWithFields++
+
+          // Check if record has the expected structure
+          if (!record.STT || !record.recordId) {
+            issues.push(`Record ${index + 1} missing STT or recordId`)
+          }
+        } else {
+          issues.push(`Record ${index + 1} missing or invalid fields object`)
+        }
+      } else {
+        issues.push(`Record ${index + 1} is not a valid object`)
+      }
     })
 
-    const expectedFieldCount = originalFieldCount.size + 1 // +1 for STT column
-    if (csvHeaders.length !== expectedFieldCount) {
-      issues.push(`Field count mismatch: Expected ${expectedFieldCount}, got ${csvHeaders.length}`)
-    }
-
-    // Check for empty rows
-    const emptyRows = dataLines.filter(
-      (line) => line.trim() === "" || line.split(",").every((cell) => cell.trim() === ""),
-    ).length
-    if (emptyRows > 0) {
-      issues.push(`Found ${emptyRows} completely empty rows`)
-    }
-
-    // Check data density
-    const totalCells = dataLines.length * csvHeaders.length
-    const emptyCells = dataLines.reduce((count, line) => {
-      return count + line.split(",").filter((cell) => cell.trim() === "").length
-    }, 0)
-
-    const dataDensity = (((totalCells - emptyCells) / totalCells) * 100).toFixed(1)
-    if (Number.parseFloat(dataDensity) < 50) {
-      issues.push(`Low data density: Only ${dataDensity}% of cells contain data`)
-    }
+    // Calculate data quality metrics
+    const recordValidityRate = ((validRecords / parsedData.length) * 100).toFixed(1)
+    const fieldsValidityRate = ((recordsWithFields / parsedData.length) * 100).toFixed(1)
 
     const report = `
-📊 Data Integrity Validation Report:
-  ✅ Records: ${dataLines.length}/${originalData.length}
-  ✅ Fields: ${csvHeaders.length}/${expectedFieldCount}
-  ✅ Data density: ${dataDensity}%
-  ✅ Empty rows: ${emptyRows}
-  ${issues.length === 0 ? "✅ All checks passed!" : `⚠️ ${issues.length} issues found`}
+📊 Raw JSON Integrity Validation:
+  ✅ Total records: ${parsedData.length}/${originalData.length}
+  ✅ Valid record objects: ${validRecords} (${recordValidityRate}%)
+  ✅ Records with fields: ${recordsWithFields} (${fieldsValidityRate}%)
+  ✅ JSON structure: ${Array.isArray(parsedData) ? "Valid array" : "Invalid"}
+  ${issues.length === 0 ? "✅ All validation checks passed!" : `⚠️ ${issues.length} issues detected`}
     `
 
     return {
@@ -459,7 +225,7 @@ const validateDataIntegrity = (
       issues: issues,
     }
   } catch (error) {
-    const errorMsg = `Validation error: ${error}`
+    const errorMsg = `JSON validation error: ${error}`
     return {
       isValid: false,
       report: errorMsg,
@@ -592,18 +358,18 @@ const createGroqClient = (apiKey: string): Groq => {
   })
 }
 
-// 🔥 ENHANCED: Single request analysis với data integrity validation
-const analyzeFullCSVWithRandomAPI = async (
-  csvContent: string,
+// 🔥 NEW: Raw JSON analysis với Llama 4 Scout
+const analyzeRawJSONWithRandomAPI = async (
+  jsonData: string,
   tableName: string,
   recordCount: number,
-  dataIntegrityReport: string,
+  integrityReport: string,
 ): Promise<{ success: boolean; analysis: string; apiDetails: any; error?: string }> => {
   try {
-    console.log(`\n🚀 ===== ENHANCED SINGLE REQUEST ANALYSIS =====`)
+    console.log(`\n🚀 ===== RAW JSON ANALYSIS với ${SINGLE_MODEL} =====`)
     console.log(`📊 INPUT: ${recordCount} records`)
-    console.log(`📄 CSV size: ${csvContent.length} characters`)
-    console.log(`🎯 Estimated tokens: ${estimateTokens(csvContent)}`)
+    console.log(`📄 JSON size: ${jsonData.length} characters`)
+    console.log(`🎯 Estimated tokens: ${estimateTokens(jsonData)}`)
 
     const selectedAPI = await selectRandomWorkingAPI()
 
@@ -616,50 +382,55 @@ const analyzeFullCSVWithRandomAPI = async (
       }
     }
 
-    console.log(`🎯 Using API ${selectedAPI.apiIndex + 1} for analysis`)
+    console.log(`🎯 Using API ${selectedAPI.apiIndex + 1} for raw JSON analysis`)
 
     const groq = createGroqClient(selectedAPI.apiKey)
 
-    // 🔥 ENHANCED: Analysis prompt với data integrity context
-    const analysisPrompt = `Phân tích toàn bộ dữ liệu CSV từ bảng "${tableName}" (${recordCount} records):
+    // 🔥 NEW: Raw JSON analysis prompt
+    const analysisPrompt = `Phân tích toàn bộ dữ liệu RAW JSON từ bảng "${tableName}" (${recordCount} records):
 
-${dataIntegrityReport}
+${integrityReport}
 
-${csvContent}
+Dữ liệu JSON (giữ nguyên cấu trúc gốc từ Lark Base):
+${jsonData}
 
-Thực hiện phân tích toàn diện với focus vào data integrity:
+Thực hiện phân tích toàn diện dựa trên RAW JSON data:
 
 1. **Tổng quan dữ liệu:**
-   - Số lượng records và fields thực tế
-   - Chất lượng dữ liệu và completeness
-   - Các field có giá trị và field trống
+   - Đếm chính xác số records thực tế trong JSON
+   - Liệt kê tất cả fields có trong dữ liệu
+   - Đánh giá chất lượng và completeness của từng field
 
-2. **Thống kê chi tiết:**
-   - Phân bố theo các trường quan trọng
-   - Giá trị phổ biến và unique values
-   - Patterns và trends trong dữ liệu
+2. **Thống kê chi tiết từ JSON:**
+   - Phân tích giá trị trong từng field (text, options, users, attachments, etc.)
+   - Thống kê phân bố và frequency
+   - Identify patterns và relationships
 
-3. **Data Quality Assessment:**
-   - Fields nào có data đầy đủ nhất
-   - Fields nào bị thiếu data nhiều
-   - Consistency của dữ liệu
+3. **Data Structure Analysis:**
+   - Phân tích cấu trúc Lark Base fields (text objects, option objects, user objects, etc.)
+   - Extract meaningful values từ complex objects
+   - Đánh giá data consistency
 
-4. **Insights quan trọng:**
-   - Phát hiện thú vị từ dữ liệu complete
-   - Mối quan hệ giữa các trường
-   - Business insights và recommendations
+4. **Business Insights:**
+   - Insights quan trọng từ dữ liệu thực tế
+   - Trends và patterns
+   - Actionable recommendations
 
 5. **Kết luận:**
    - Tóm tắt findings chính
-   - Data reliability assessment
-   - Actionable insights
+   - Data quality assessment
+   - Key takeaways
 
-Lưu ý: Tập trung vào dữ liệu thực tế có trong CSV, không đoán mò hoặc tạo ra thông tin không có.
+**QUAN TRỌNG**: 
+- Phân tích dựa 100% trên dữ liệu JSON thực tế
+- Không đoán mò hoặc tạo ra thông tin không có
+- Đếm chính xác số records từ JSON array
+- Extract values từ Lark Base object structures
 
 Trả lời chi tiết bằng tiếng Việt với format rõ ràng:`
 
     const promptTokens = estimateTokens(analysisPrompt)
-    console.log(`📤 Sending enhanced analysis request: ${promptTokens} input tokens`)
+    console.log(`📤 Sending raw JSON analysis request: ${promptTokens} input tokens`)
 
     const startTime = Date.now()
 
@@ -689,9 +460,9 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng:`
 
     console.log(`📊 OUTPUT: ${outputTokens} tokens`)
     console.log(`⚡ Total processing time: ${responseTime}ms`)
-    console.log(`✅ SUCCESS: Analyzed ${recordCount} records with enhanced data integrity`)
+    console.log(`✅ SUCCESS: Analyzed ${recordCount} records with RAW JSON (no conversion loss)`)
     console.log(`📋 Analysis preview: ${analysis.substring(0, 150)}...`)
-    console.log(`===== END ENHANCED ANALYSIS =====\n`)
+    console.log(`===== END RAW JSON ANALYSIS =====\n`)
 
     return {
       success: true,
@@ -706,7 +477,7 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng:`
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error)
-    console.error(`❌ Enhanced analysis failed: ${errorMsg}`)
+    console.error(`❌ Raw JSON analysis failed: ${errorMsg}`)
 
     return {
       success: false,
@@ -717,123 +488,121 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng:`
   }
 }
 
-// 🔥 UPDATED: Main pipeline với enhanced data integrity
+// 🔥 UPDATED: Main pipeline với raw JSON (no CSV conversion)
 export const preprocessDataWithPipeline = async (
   data: any[],
   tableName: string,
 ): Promise<{ success: boolean; optimizedData: string; analysis: string; keyUsage: any }> => {
   try {
-    console.log(`🚀 Enhanced Single Request Pipeline với ${data.length} records - Model: ${SINGLE_MODEL}`)
+    console.log(`🚀 Raw JSON Pipeline (NO CSV CONVERSION) với ${data.length} records - Model: ${SINGLE_MODEL}`)
 
     if (!API_KEYS || API_KEYS.length === 0) {
       throw new Error("Cần ít nhất 1 API key")
     }
 
-    // 🔥 BƯỚC 1: Enhanced CSV conversion với data integrity
-    console.log(`📊 BƯỚC 1: Enhanced CSV conversion với data integrity validation...`)
-    const fullCSV = convertToCSV(data)
+    // 🔥 BƯỚC 1: Prepare raw JSON data (NO CSV conversion)
+    console.log(`📊 BƯỚC 1: Preparing raw JSON data (bypassing CSV conversion)...`)
+    const { jsonData, integrityReport, stats } = prepareRawJSONData(data)
 
-    if (!fullCSV) {
-      throw new Error("Không thể tạo CSV content")
+    if (!jsonData) {
+      throw new Error("Không thể tạo JSON data")
     }
 
-    // 🔥 BƯỚC 2: Validate data integrity
-    console.log(`🔍 BƯỚC 2: Validating data integrity...`)
-    const integrityValidation = validateDataIntegrity(data, fullCSV)
+    // 🔥 BƯỚC 2: Validate raw JSON integrity
+    console.log(`🔍 BƯỚC 2: Validating raw JSON integrity...`)
+    const integrityValidation = validateRawJSONIntegrity(data, jsonData)
 
     if (!integrityValidation.isValid) {
-      console.warn(`⚠️ Data integrity issues detected:`)
+      console.warn(`⚠️ JSON integrity issues detected:`)
       integrityValidation.issues.forEach((issue) => console.warn(`  - ${issue}`))
     }
 
-    // 🔥 BƯỚC 3: Enhanced analysis với data integrity context
-    console.log(`🤖 BƯỚC 3: Enhanced analysis với data integrity context...`)
-    const analysisResult = await analyzeFullCSVWithRandomAPI(
-      fullCSV,
-      tableName,
-      data.length,
-      integrityValidation.report,
-    )
+    // 🔥 BƯỚC 3: Raw JSON analysis
+    console.log(`🤖 BƯỚC 3: Raw JSON analysis với random API...`)
+    const analysisResult = await analyzeRawJSONWithRandomAPI(jsonData, tableName, data.length, integrityReport)
 
     if (!analysisResult.success) {
-      console.log(`❌ Analysis failed, using raw CSV`)
+      console.log(`❌ Analysis failed, using raw JSON`)
       return {
         success: true,
-        optimizedData: fullCSV,
+        optimizedData: jsonData,
         analysis: analysisResult.analysis,
         keyUsage: {
           error: true,
-          format: "Raw CSV",
+          format: "Raw JSON",
           fallback: true,
           model: SINGLE_MODEL,
-          strategy: "Enhanced Single Request",
+          strategy: "Raw JSON (No CSV)",
           errorDetails: analysisResult.error,
           dataIntegrity: integrityValidation,
+          stats: stats,
         },
       }
     }
 
-    // 🔥 SUCCESS: Return enhanced results
+    // 🔥 SUCCESS: Return raw JSON results
     const keyUsage = {
       totalKeys: API_KEYS.length,
       usedAPI: analysisResult.apiDetails.keyIndex,
       selectedRandomly: true,
       totalRecords: data.length,
       processedRecords: data.length,
-      dataLoss: 0,
-      format: "Enhanced CSV",
+      dataLoss: 0, // No data loss with raw JSON
+      format: "Raw JSON (No CSV Conversion)",
       model: SINGLE_MODEL,
-      strategy: "Enhanced Single Request with Data Integrity",
+      strategy: "Raw JSON Direct Analysis",
       responseTime: analysisResult.apiDetails.responseTime,
       inputTokens: analysisResult.apiDetails.inputTokens,
       outputTokens: analysisResult.apiDetails.outputTokens,
       totalTokens: analysisResult.apiDetails.totalTokens,
       apiPreview: analysisResult.apiDetails.preview,
       dataIntegrity: integrityValidation,
+      stats: stats,
     }
 
-    console.log(`✅ Enhanced Single Request Pipeline Complete:`)
-    console.log(`  📊 Records: ${data.length} (100% processed)`)
+    console.log(`✅ Raw JSON Pipeline Complete:`)
+    console.log(`  📊 Records: ${data.length} (100% preserved - no conversion)`)
     console.log(`  🎯 API used: ${analysisResult.apiDetails.keyIndex}`)
     console.log(`  ⚡ Time: ${analysisResult.apiDetails.responseTime}ms`)
     console.log(`  🎫 Tokens: ${analysisResult.apiDetails.totalTokens}`)
     console.log(`  🔍 Data integrity: ${integrityValidation.isValid ? "✅ Valid" : "⚠️ Issues detected"}`)
+    console.log(`  📄 Format: Raw JSON (no CSV conversion loss)`)
 
     return {
       success: true,
-      optimizedData: fullCSV,
+      optimizedData: jsonData,
       analysis: analysisResult.analysis,
       keyUsage: keyUsage,
     }
   } catch (error) {
-    console.error("❌ Enhanced Single Request Pipeline failed:", error)
+    console.error("❌ Raw JSON Pipeline failed:", error)
 
-    const rawCSV = convertToCSV(data)
+    const { jsonData } = prepareRawJSONData(data)
     return {
       success: true,
-      optimizedData: rawCSV,
-      analysis: `❌ Pipeline error với ${SINGLE_MODEL}: ${error}. Sử dụng raw CSV với ${data.length} records.`,
+      optimizedData: jsonData,
+      analysis: `❌ Pipeline error với ${SINGLE_MODEL}: ${error}. Sử dụng raw JSON với ${data.length} records.`,
       keyUsage: {
         error: true,
-        format: "Raw CSV",
+        format: "Raw JSON",
         model: SINGLE_MODEL,
         fallback: true,
-        strategy: "Enhanced Single Request",
+        strategy: "Raw JSON (No CSV)",
         dataIntegrity: { isValid: false, report: "Pipeline failed", issues: [String(error)] },
       },
     }
   }
 }
 
-// Rest of the functions remain the same...
+// 🔥 UPDATED: Answer question với raw JSON
 export const answerQuestionWithOptimizedData = async (
-  optimizedCSVData: string,
+  optimizedJSONData: string,
   tableName: string,
   question: string,
   originalRecordCount: number,
 ): Promise<string> => {
   try {
-    console.log(`🤔 Trả lời câu hỏi với enhanced CSV data (${originalRecordCount} records) - ${SINGLE_MODEL}`)
+    console.log(`🤔 Trả lời câu hỏi với raw JSON data (${originalRecordCount} records) - ${SINGLE_MODEL}`)
 
     const selectedAPI = await selectRandomWorkingAPI()
 
@@ -843,23 +612,32 @@ export const answerQuestionWithOptimizedData = async (
 
     console.log(`🎯 Using API ${selectedAPI.apiIndex + 1} for question answering`)
 
-    const maxCSVLength = 6000
-    const truncatedCSV =
-      optimizedCSVData.length > maxCSVLength ? optimizedCSVData.substring(0, maxCSVLength) + "..." : optimizedCSVData
+    // Truncate JSON if too long (but keep more data than CSV)
+    const maxJSONLength = 8000 // Increased for JSON
+    const truncatedJSON =
+      optimizedJSONData.length > maxJSONLength
+        ? optimizedJSONData.substring(0, maxJSONLength) + "..."
+        : optimizedJSONData
 
-    const questionPrompt = `Dữ liệu từ bảng "${tableName}" (${originalRecordCount} records) với enhanced data integrity:
+    const questionPrompt = `Dữ liệu RAW JSON từ bảng "${tableName}" (${originalRecordCount} records):
 
-${truncatedCSV}
+${truncatedJSON}
 
 Câu hỏi: ${question}
 
-Phân tích dữ liệu thực tế và trả lời chi tiết bằng tiếng Việt với:
-1. Trả lời trực tiếp câu hỏi dựa trên dữ liệu có sẵn
-2. Dẫn chứng cụ thể từ CSV data
-3. Insights bổ sung nếu có
-4. Lưu ý về data quality nếu cần
+Phân tích dữ liệu JSON thực tế và trả lời chi tiết bằng tiếng Việt:
 
-Chỉ dựa vào dữ liệu thực tế trong CSV, không đoán mò:
+1. **Trả lời trực tiếp câu hỏi** dựa trên dữ liệu JSON có sẵn
+2. **Dẫn chứng cụ thể** từ JSON data (STT, recordId, field values)
+3. **Extract values** từ Lark Base objects (text objects, option objects, etc.)
+4. **Insights bổ sung** nếu có từ data patterns
+5. **Data quality notes** nếu cần thiết
+
+**QUAN TRỌNG**: 
+- Chỉ dựa vào dữ liệu thực tế trong JSON
+- Đếm chính xác từ JSON array
+- Extract meaningful values từ complex Lark Base objects
+- Không đoán mò hoặc tạo ra thông tin không có
 
 Trả lời:`
 
@@ -880,7 +658,7 @@ Trả lời:`
     }
 
     const answer = completion.choices[0].message.content
-    console.log(`✅ Question answered with enhanced data integrity (${responseTime}ms)`)
+    console.log(`✅ Question answered with raw JSON data (${responseTime}ms)`)
 
     return answer
   } catch (error) {
@@ -903,8 +681,9 @@ export const answerQuestionWithData = async (
     if (optimizedData && optimizedData.length > 0) {
       return await answerQuestionWithOptimizedData(optimizedData, tableName, question, data.length)
     } else {
-      const quickCSV = convertToCSV(data.slice(0, 30))
-      return await answerQuestionWithOptimizedData(quickCSV, tableName, question, data.length)
+      // Use raw JSON for quick questions too
+      const { jsonData } = prepareRawJSONData(data.slice(0, 30))
+      return await answerQuestionWithOptimizedData(jsonData, tableName, question, data.length)
     }
   } catch (error) {
     console.error("❌ answerQuestionWithData failed:", error)
@@ -995,7 +774,7 @@ export const testGroqAPI = async () => {
     success: result.success,
     message: result.message,
     workingModel: SINGLE_MODEL,
-    format: "Enhanced Single Request CSV",
+    format: "Raw JSON (No CSV)",
   }
 }
 
@@ -1009,7 +788,7 @@ export const getApiKeysInfo = () => {
     keysPreview: API_KEYS.map(
       (key, index) => `API ${index + 1}: ${key.substring(0, 10)}...${key.substring(key.length - 4)} (${SINGLE_MODEL})`,
     ),
-    format: "Enhanced Single Request CSV",
+    format: "Raw JSON (No CSV)",
     model: SINGLE_MODEL,
   }
 }

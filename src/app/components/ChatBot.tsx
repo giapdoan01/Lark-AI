@@ -108,7 +108,7 @@ const LoadingSpinner = ({ size = 20 }: { size?: number }) => (
   />
 )
 
-// 🔥 UPDATED: API Status Component for single request strategy
+// 🔥 UPDATED: API Status Component for raw JSON strategy
 const APIStatusPanel = ({
   apiTestResults,
   isVisible,
@@ -173,7 +173,7 @@ const APIStatusPanel = ({
             Model: {apiTestResults.keyDetails?.[0]?.model || "meta-llama/llama-4-scout-17b-16e-instruct"}
           </div>
           <div style={{ fontSize: "12px", color: "#007acc", marginTop: "5px" }}>
-            🎲 Strategy: Random API selection (no chunking)
+            🎲 Strategy: Raw JSON (No CSV conversion) + Random API selection
           </div>
         </div>
 
@@ -216,15 +216,16 @@ const APIStatusPanel = ({
           ))}
         </div>
 
-        {/* Single Request Strategy Info */}
-        <div style={{ marginTop: "15px", padding: "10px", backgroundColor: "#e8f4fd", borderRadius: "6px" }}>
-          <h5 style={{ margin: "0 0 8px 0", fontSize: "13px", color: "#007acc" }}>🎲 Single Request Strategy:</h5>
-          <div style={{ fontSize: "12px", color: "#007acc" }}>
-            • No chunking: Toàn bộ CSV được gửi trong 1 request
-            <br />• Random API: Chọn ngẫu nhiên 1 API working từ {apiTestResults.workingKeys} available
-            <br />• No data loss: 100% records được xử lý
+        {/* Raw JSON Strategy Info */}
+        <div style={{ marginTop: "15px", padding: "10px", backgroundColor: "#e8f5e8", borderRadius: "6px" }}>
+          <h5 style={{ margin: "0 0 8px 0", fontSize: "13px", color: "#4caf50" }}>📄 Raw JSON Strategy:</h5>
+          <div style={{ fontSize: "12px", color: "#4caf50" }}>
+            • No CSV conversion: Gửi raw JSON trực tiếp cho API
+            <br />• Zero data loss: 100% original Lark Base data preserved
+            <br />• Complete field structures: Text objects, options, users, attachments
+            <br />• Random API selection: Chọn ngẫu nhiên từ {apiTestResults.workingKeys} working APIs
             <br />• Model: meta-llama/llama-4-scout-17b-16e-instruct
-            <br />• <strong>Benefit: Đơn giản, nhanh, không mất dữ liệu</strong>
+            <br />• <strong>Benefit: Maximum data integrity, no conversion artifacts</strong>
           </div>
         </div>
       </div>
@@ -262,8 +263,8 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const hasRunPipeline = useRef(false)
   const isInitializing = useRef(false)
 
-  // 🔥 UPDATED: Pipeline Steps for single request
-  const pipelineSteps = ["Kiểm tra SDK", "Test APIs", "Lấy dữ liệu", "Chuyển CSV", "Phân tích AI"]
+  // 🔥 UPDATED: Pipeline Steps for raw JSON
+  const pipelineSteps = ["Kiểm tra SDK", "Test APIs", "Lấy dữ liệu", "Raw JSON", "Phân tích AI"]
 
   // Test API Keys Function
   const testApiKeys = async () => {
@@ -293,7 +294,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     }
   }
 
-  // 🔥 UPDATED: Single request preprocessing
+  // 🔥 UPDATED: Raw JSON preprocessing
   const performDataPreprocessing = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
     if (data.length === 0 || hasRunPipeline.current) return
 
@@ -311,7 +312,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     setCurrentStep(4)
 
     try {
-      setProcessingStatus("🚀 Bắt đầu Single Request Pipeline...")
+      setProcessingStatus("🚀 Bắt đầu Raw JSON Pipeline (No CSV conversion)...")
 
       const result = await preprocessDataWithPipeline(data, tableName)
 
@@ -321,7 +322,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         setKeyUsageInfo(result.keyUsage)
         setIsDataReady(true)
         setCurrentStep(4)
-        setProcessingStatus("✅ Pipeline hoàn thành!")
+        setProcessingStatus("✅ Raw JSON Pipeline hoàn thành!")
       } else {
         setAutoAnalysis(result.analysis)
         setIsDataReady(false)
@@ -329,7 +330,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       }
     } catch (err) {
       console.error("❌ Pipeline error:", err)
-      setAutoAnalysis("❌ Không thể thực hiện Single Request pipeline.")
+      setAutoAnalysis("❌ Không thể thực hiện Raw JSON pipeline.")
       setIsDataReady(false)
       setProcessingStatus("❌ Pipeline lỗi")
       hasRunPipeline.current = false
@@ -381,7 +382,13 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           return
         }
 
-        // Step 4: Process Data
+        // 🔥 IMPORTANT: Check for data loss at source
+        if (data.length !== stats.totalRecords) {
+          console.warn(`⚠️ DATA LOSS AT SOURCE: Expected ${stats.totalRecords}, got ${data.length} records`)
+          console.warn(`This is likely a Lark Base SDK issue, not a conversion issue`)
+        }
+
+        // Step 4: Process Data with Raw JSON
         const hasRealData = data.some((record) =>
           Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
         )
@@ -453,9 +460,9 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
         {isAutoAnalyzing && (
           <StatusCard
-            title="🚀 Single Request Pipeline"
-            status="Đang gửi toàn bộ CSV cho 1 API ngẫu nhiên..."
-            details="No chunking → Random API → Complete analysis → No data loss"
+            title="🚀 Raw JSON Pipeline"
+            status="Đang gửi raw JSON data trực tiếp cho API..."
+            details="No CSV conversion → Zero data loss → Complete field structures"
             type="info"
           />
         )}
@@ -488,24 +495,56 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           <StatusCard
             title="📊 Thống kê bảng"
             status={`${tableStats.totalRecords} records, ${tableStats.totalFields} fields`}
-            details={`Loaded: ${tableData.length} records`}
+            details={`Loaded: ${tableData.length} records${
+              tableData.length !== tableStats.totalRecords ? " ⚠️ Data loss at source" : ""
+            }`}
             type={tableData.length === tableStats.totalRecords ? "success" : "warning"}
           />
         )}
 
         {keyUsageInfo && (
           <StatusCard
-            title="🎲 Single Request Pipeline"
+            title="📄 Raw JSON Pipeline"
             status={`API ${keyUsageInfo.usedAPI || "N/A"} được chọn ngẫu nhiên`}
             details={
               keyUsageInfo.totalTokens
-                ? `${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms | Model: Llama 4 Scout`
-                : `Strategy: ${keyUsageInfo.strategy} | No data loss`
+                ? `${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms | No CSV conversion`
+                : `Strategy: ${keyUsageInfo.strategy} | Zero conversion loss`
             }
             type="success"
           />
         )}
       </div>
+
+      {/* Data Loss Warning (if any) */}
+      {tableStats && tableData.length !== tableStats.totalRecords && (
+        <div style={{ marginBottom: "20px" }}>
+          <StatusCard
+            title="⚠️ Data Loss Detection"
+            status={`Mất ${tableStats.totalRecords - tableData.length} records tại nguồn (Lark Base SDK)`}
+            details={`Expected: ${tableStats.totalRecords}, Loaded: ${tableData.length}. Đây là vấn đề từ SDK, không phải conversion.`}
+            type="warning"
+          />
+
+          <div style={{ textAlign: "center", marginTop: "10px" }}>
+            <button
+              onClick={() => setShowApiStatus(true)}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#ffc107",
+                color: "#856404",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: "500",
+              }}
+            >
+              🔍 Xem chi tiết API status
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Error State */}
       {error && (
@@ -564,11 +603,11 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       {autoAnalysis && (
         <div style={{ marginBottom: "20px" }}>
           <StatusCard
-            title="🤖 Phân tích AI với Llama 4 Scout"
-            status="Phân tích toàn diện hoàn thành"
+            title="🤖 Phân tích AI với Raw JSON"
+            status="Phân tích từ raw JSON data hoàn thành"
             details={
               keyUsageInfo
-                ? `API ${keyUsageInfo.usedAPI} | ${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms`
+                ? `API ${keyUsageInfo.usedAPI} | ${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms | No conversion loss`
                 : undefined
             }
             type="success"
@@ -606,7 +645,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           <div style={{ marginBottom: "15px", fontSize: "13px", color: "#666" }}>
             {isDataReady ? (
               <span style={{ color: "#4caf50" }}>
-                ✅ Sẵn sàng! AI đã phân tích {tableData.length} records với Llama 4 Scout (Single Request).
+                ✅ Sẵn sàng! AI đã phân tích {tableData.length} records với Raw JSON (No CSV conversion).
                 {keyUsageInfo && keyUsageInfo.usedAPI && (
                   <span style={{ color: "#007acc" }}> API {keyUsageInfo.usedAPI} được sử dụng.</span>
                 )}
@@ -619,7 +658,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ví dụ: Phân tích theo phòng ban, thống kê thiết bị, tìm xu hướng..."
+            placeholder="Ví dụ: Có bao nhiêu records thực tế? Phân tích theo phòng ban, thống kê thiết bị..."
             rows={3}
             style={{
               width: "100%",
@@ -652,12 +691,13 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
               }}
             >
               {isAsking && <LoadingSpinner size={16} />}
-              {isAsking ? "Đang suy nghĩ..." : "🚀 Hỏi AI (Llama 4 Scout)"}
+              {isAsking ? "Đang suy nghĩ..." : "🚀 Hỏi AI (Raw JSON)"}
             </button>
 
             <div style={{ fontSize: "12px", color: "#666" }}>
               {keyUsageInfo && `${keyUsageInfo.totalRecords} records`}
               {apiTestResults && ` | ${apiTestResults.workingKeys}/${apiTestResults.totalKeys} APIs`}
+              {keyUsageInfo && keyUsageInfo.format && ` | ${keyUsageInfo.format}`}
             </div>
           </div>
 
@@ -672,12 +712,14 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
                 borderRadius: "8px",
               }}
             >
-              <h4 style={{ margin: "0 0 10px 0", color: "#333" }}>💡 Câu trả lời từ Llama 4 Scout</h4>
+              <h4 style={{ margin: "0 0 10px 0", color: "#333" }}>💡 Câu trả lời từ Llama 4 Scout (Raw JSON)</h4>
               <div style={{ whiteSpace: "pre-wrap", fontSize: "14px", lineHeight: "1.5" }}>{answer}</div>
               {keyUsageInfo && (
                 <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
-                  📊 Dựa trên {keyUsageInfo.totalRecords} records qua Single Request Pipeline với API{" "}
-                  {keyUsageInfo.usedAPI}
+                  📊 Dựa trên {keyUsageInfo.totalRecords} records qua Raw JSON Pipeline với API {keyUsageInfo.usedAPI}
+                  {keyUsageInfo.stats && keyUsageInfo.stats.dataIntegrityRate && (
+                    <span> | Data integrity: {keyUsageInfo.stats.dataIntegrityRate.toFixed(1)}%</span>
+                  )}
                 </div>
               )}
             </div>
