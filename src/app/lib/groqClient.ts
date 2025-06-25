@@ -57,7 +57,7 @@ const testSingleChunk = async (chunk: any[], keyIndex: number): Promise<boolean>
 }
 
 // Function chia dữ liệu theo token limit
-const chunkDataByTokens = (data: any[], maxTokensPerChunk = 5000): any[][] => {
+const chunkDataByTokens = (data: any[], maxTokensPerChunk = 4000): any[][] => {
   const chunks: any[][] = []
   let currentChunk: any[] = []
   let currentTokens = 0
@@ -166,6 +166,36 @@ const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: st
   }
 }
 
+// Function debug optimize process chi tiết
+const debugOptimizeProcess = async (chunk: any[], keyIndex: number): Promise<void> => {
+  try {
+    const chunkText = JSON.stringify(chunk, null, 1)
+    const estimatedTokens = estimateTokens(chunkText)
+
+    console.log(`🔍 DEBUG Chunk ${keyIndex + 1}:`)
+    console.log(`  - Records: ${chunk.length}`)
+    console.log(`  - Characters: ${chunkText.length}`)
+    console.log(`  - Estimated tokens: ${estimatedTokens}`)
+    console.log(`  - Sample record:`, JSON.stringify(chunk[0], null, 1).substring(0, 200) + "...")
+
+    // Test API key trước
+    const apiKey = API_KEYS[keyIndex]
+    const groq = createGroqClient(apiKey)
+
+    console.log(`🧪 Testing key ${keyIndex + 1} với simple request...`)
+    const testResult = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [{ role: "user", content: "Say 'test ok'" }],
+      temperature: 0.1,
+      max_tokens: 10,
+    })
+
+    console.log(`✅ Key ${keyIndex + 1} test result:`, testResult?.choices?.[0]?.message?.content)
+  } catch (error) {
+    console.error(`❌ DEBUG failed for key ${keyIndex + 1}:`, error)
+  }
+}
+
 // Function để optimize/compress dữ liệu với 1 API key
 const optimizeDataChunk = async (
   apiKey: string,
@@ -193,6 +223,10 @@ Return optimized JSON only:`
 
     // Chỉ thử model duy nhất
     try {
+      // Thêm debug trước khi optimize
+      console.log(`🔍 DEBUG: Bắt đầu optimize chunk ${chunkIndex + 1}`)
+      await debugOptimizeProcess(dataChunk, keyIndex)
+
       console.log(`🤖 Key ${keyIndex + 1}: Gửi request với ${estimateTokens(optimizePrompt)} tokens`)
 
       const completion = (await Promise.race([
@@ -205,7 +239,7 @@ Return optimized JSON only:`
             },
           ],
           temperature: 0.1,
-          max_tokens: 8000, // Giảm từ 15000 xuống 8000
+          max_tokens: 6000, // Giảm từ 15000 xuống 8000
         }),
         new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 60s")), 60000)),
       ])) as any
@@ -270,9 +304,14 @@ export const preprocessDataWithPipeline = async (
       throw new Error("Không có API keys nào hoạt động")
     }
 
+    // Thêm adaptive chunking
+    console.log(`📊 BƯỚC 1: Adaptive chunking dựa trên working keys (${workingKeys} keys)`)
+    const chunkSize = workingKeys >= 3 ? 4000 : 3000 // Giảm từ 5000 xuống 4000
+    console.log(`📊 Sử dụng chunk size: ${chunkSize} tokens`)
+
     // BƯỚC 1: Chia dữ liệu thành chunks theo token limit
-    console.log(`📊 BƯỚC 1: Chia dữ liệu theo token limit (5000 tokens/chunk)`)
-    let chunks = chunkDataByTokens(data, 5000)
+    console.log(`📊 BƯỚC 1: Chia dữ liệu theo token limit (4000 tokens/chunk)`)
+    let chunks = chunkDataByTokens(data, chunkSize)
 
     // Nếu vẫn chỉ có 1 chunk lớn, thử strategy khác
     if (chunks.length === 1) {
@@ -310,28 +349,52 @@ export const preprocessDataWithPipeline = async (
 
       console.log(`🔧 Xử lý chunk ${i + 1}/${chunks.length} với key ${keyIndex + 1}`)
 
-      try {
-        const result = await optimizeDataChunk(API_KEYS[keyIndex], keyIndex, chunk, i, chunks.length)
-        optimizeResults.push(result)
+      // Debug trước khi optimize
+      await debugOptimizeProcess(chunk, keyIndex)
 
-        if (result.success) {
-          console.log(`✅ Chunk ${i + 1}: Thành công`)
-        } else {
-          console.log(`❌ Chunk ${i + 1}: Thất bại - ${result.error}`)
+      let result = null
+      let retryCount = 0
+      const maxRetries = 2
+
+      // Retry mechanism
+      while (retryCount <= maxRetries && (!result || !result.success)) {
+        try {
+          if (retryCount > 0) {
+            console.log(`🔄 Retry ${retryCount}/${maxRetries} cho chunk ${i + 1}`)
+            await new Promise((resolve) => setTimeout(resolve, 2000)) // Wait 2s
+          }
+
+          result = await optimizeDataChunk(API_KEYS[keyIndex], keyIndex, chunk, i, chunks.length)
+
+          if (result && result.success) {
+            console.log(`✅ Chunk ${i + 1}: Thành công sau ${retryCount} retries`)
+            break
+          } else {
+            console.log(`❌ Chunk ${i + 1}: Thất bại lần ${retryCount + 1} - ${result?.error || "Unknown error"}`)
+          }
+        } catch (error) {
+          console.log(`❌ Chunk ${i + 1}: Exception lần ${retryCount + 1} - ${error}`)
+          result = {
+            success: false,
+            optimizedData: "",
+            keyIndex: keyIndex,
+            error: String(error),
+          }
         }
-      } catch (error) {
-        console.log(`❌ Chunk ${i + 1}: Exception - ${error}`)
+
+        retryCount++
+      }
+
+      // Đảm bảo result không null trước khi push
+      if (result) {
+        optimizeResults.push(result)
+      } else {
         optimizeResults.push({
           success: false,
           optimizedData: "",
           keyIndex: keyIndex,
-          error: String(error),
+          error: "No result after retries",
         })
-      }
-
-      // Delay giữa các requests
-      if (i < chunks.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1000))
       }
     }
 
@@ -350,6 +413,38 @@ export const preprocessDataWithPipeline = async (
     const failedOptimizes = optimizeResults.filter((r) => r && !r.success)
 
     console.log(`📊 Optimize results: ${successfulOptimizes.length}/${optimizeResults.length} thành công`)
+
+    // Emergency fallback nếu success rate quá thấp
+    if (successfulOptimizes.length > 0 && successfulOptimizes.length < optimizeResults.length * 0.3) {
+      console.log(
+        `⚠️ Success rate thấp (${Math.round((successfulOptimizes.length / optimizeResults.length) * 100)}%), thử với chunks nhỏ hơn`,
+      )
+
+      // Thử lại với chunks 2K tokens
+      console.log(`🔄 Emergency retry với 2K tokens chunks...`)
+      const smallChunks = chunkDataByTokens(data, 2000)
+
+      if (smallChunks.length > chunks.length) {
+        console.log(`📊 Tạo ${smallChunks.length} chunks nhỏ hơn, thử optimize 3 chunks đầu...`)
+
+        for (let i = 0; i < Math.min(3, smallChunks.length); i++) {
+          const smallChunk = smallChunks[i]
+          const keyIndex = i % (API_KEYS.length - 1)
+
+          try {
+            const smallResult = await optimizeDataChunk(API_KEYS[keyIndex], keyIndex, smallChunk, i, 3)
+            if (smallResult.success) {
+              console.log(`✅ Emergency chunk ${i + 1}: Thành công`)
+              successfulOptimizes.push(smallResult)
+            }
+          } catch (error) {
+            console.log(`❌ Emergency chunk ${i + 1}: ${error}`)
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        }
+      }
+    }
 
     // Nếu tất cả thất bại, thử fallback với raw data
     if (successfulOptimizes.length === 0) {
