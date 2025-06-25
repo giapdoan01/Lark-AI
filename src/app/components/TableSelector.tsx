@@ -80,6 +80,9 @@ export default function TableSelector({
     <div>
       <div style={{ marginBottom: "10px" }}>
         <div style={{ fontSize: "12px", color: "#666" }}>✅ {sdkStatus}</div>
+        <div style={{ fontSize: "12px", color: "#007acc", marginTop: "5px" }}>
+          📊 Dữ liệu sẽ được chuyển đổi sang CSV format để tối ưu tokens
+        </div>
       </div>
 
       <label htmlFor="table-select">📊 Chọn bảng dữ liệu:</label>
@@ -97,7 +100,7 @@ export default function TableSelector({
         <option value="">-- Chọn bảng ({tables.length} bảng có sẵn) --</option>
         {tables.map((t) => (
           <option key={t.id} value={t.id}>
-            {t.name}
+            {t.name} (CSV optimized)
           </option>
         ))}
       </select>
