@@ -10,13 +10,139 @@ const API_KEYS = [
 ].filter((key) => key && !key.includes("account") && key.startsWith("gsk_"))
 
 const AVAILABLE_MODELS = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-  "llama3-70b-8192",
-  "llama3-8b-8192",
-  "mixtral-8x7b-32768",
-  "gemma-7b-it",
+  "llama-3.3-70b-versatile", // v25 - chỉ dùng model này
 ]
+
+// Function ước tính số tokens (1 token ≈ 4 characters)
+const estimateTokens = (text: string): number => {
+  return Math.ceil(text.length / 4)
+}
+
+// Thêm function test single chunk trước khi chạy pipeline
+const testSingleChunk = async (chunk: any[], keyIndex: number): Promise<boolean> => {
+  try {
+    const apiKey = API_KEYS[keyIndex]
+    const chunkText = JSON.stringify(chunk, null, 1)
+    const estimatedTokens = estimateTokens(chunkText)
+
+    console.log(`🧪 Test chunk: ${chunk.length} records, ~${estimatedTokens} tokens`)
+
+    if (estimatedTokens > 15000) {
+      console.log(`⚠️ Chunk quá lớn (${estimatedTokens} tokens), cần chia nhỏ hơn`)
+      return false
+    }
+
+    const groq = createGroqClient(apiKey)
+
+    // Test với prompt đơn giản
+    const testCompletion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "user",
+          content: "Test: Return 'OK'",
+        },
+      ],
+      temperature: 0.1,
+      max_tokens: 10,
+    })
+
+    const response = testCompletion?.choices?.[0]?.message?.content
+    console.log(`✅ Key ${keyIndex + 1} test OK: ${response}`)
+    return true
+  } catch (error) {
+    console.log(`❌ Key ${keyIndex + 1} test failed: ${error}`)
+    return false
+  }
+}
+
+// Thêm function test optimize đơn giản
+const testOptimizeSimple = async (keyIndex: number): Promise<boolean> => {
+  try {
+    const apiKey = API_KEYS[keyIndex]
+    const groq = createGroqClient(apiKey)
+
+    console.log(`🧪 Test optimize với key ${keyIndex + 1}...`)
+
+    // Test với data đơn giản
+    const testData = [{ id: 1, name: "test", value: null }]
+    const testPrompt = `Optimize JSON: ${JSON.stringify(testData)}. Return optimized JSON only:`
+
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [{ role: "user", content: testPrompt }],
+      temperature: 0.1,
+      max_tokens: 100,
+    })
+
+    const result = completion?.choices?.[0]?.message?.content
+    console.log(`✅ Key ${keyIndex + 1} optimize test result:`, result?.substring(0, 100))
+
+    // Thử parse JSON
+    if (result) {
+      JSON.parse(result.trim())
+      return true
+    }
+    return false
+  } catch (error) {
+    console.log(`❌ Key ${keyIndex + 1} optimize test failed:`, error)
+    return false
+  }
+}
+
+// Function chia dữ liệu theo token limit
+const chunkDataByTokens = (data: any[], maxTokensPerChunk = 4000): any[][] => {
+  const chunks: any[][] = []
+  let currentChunk: any[] = []
+  let currentTokens = 0
+
+  console.log(`📊 Bắt đầu chia ${data.length} records với limit ${maxTokensPerChunk} tokens/chunk`)
+
+  for (const record of data) {
+    const recordText = JSON.stringify(record, null, 1)
+    const recordTokens = estimateTokens(recordText)
+
+    // Log record đầu tiên để debug
+    if (currentChunk.length === 0 && chunks.length === 0) {
+      console.log(`📊 Sample record tokens: ${recordTokens} (${recordText.length} chars)`)
+
+      // Nếu 1 record đã quá lớn, cảnh báo
+      if (recordTokens > maxTokensPerChunk) {
+        console.warn(`⚠️ Single record quá lớn: ${recordTokens} tokens > ${maxTokensPerChunk} limit`)
+      }
+    }
+
+    // Nếu thêm record này vào chunk hiện tại sẽ vượt quá limit
+    if (currentTokens + recordTokens > maxTokensPerChunk && currentChunk.length > 0) {
+      console.log(`📊 Chunk ${chunks.length + 1} hoàn thành: ${currentChunk.length} records, ${currentTokens} tokens`)
+      chunks.push([...currentChunk])
+      currentChunk = [record]
+      currentTokens = recordTokens
+    } else {
+      currentChunk.push(record)
+      currentTokens += recordTokens
+    }
+  }
+
+  // Thêm chunk cuối cùng nếu có
+  if (currentChunk.length > 0) {
+    console.log(`📊 Chunk cuối ${chunks.length + 1}: ${currentChunk.length} records, ${currentTokens} tokens`)
+    chunks.push(currentChunk)
+  }
+
+  console.log(`📊 Kết quả chia: ${chunks.length} chunks từ ${data.length} records`)
+
+  // Nếu chỉ có 1 chunk và quá lớn, thử chia nhỏ hơn
+  if (chunks.length === 1) {
+    const singleChunkTokens = estimateTokens(JSON.stringify(chunks[0], null, 1))
+    if (singleChunkTokens > 10000) {
+      console.log(`⚠️ Single chunk quá lớn (${singleChunkTokens} tokens), thử chia nhỏ hơn...`)
+      return chunkDataByTokens(data, Math.floor(maxTokensPerChunk / 2)) // Chia đôi
+    }
+  }
+
+  return chunks
+}
 
 const createGroqClient = (apiKey: string): Groq => {
   return new Groq({
@@ -28,53 +154,53 @@ const createGroqClient = (apiKey: string): Groq => {
 // Helper function để phân tích với 1 key - di chuyển lên trước
 const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: string): Promise<string> => {
   try {
-    console.log(`🤖 Phân tích với key ${keyIndex + 1}`)
+    const promptTokens = estimateTokens(prompt)
+    console.log(`🤖 FINAL ANALYSIS với key ${keyIndex + 1}:`)
+    console.log(`  🎯 Analysis INPUT tokens: ${promptTokens}`)
+    console.log(`  ⚡ Model: llama-3.3-70b-versatile (v25)`)
 
     const groq = createGroqClient(apiKey)
 
-    for (const model of AVAILABLE_MODELS) {
-      try {
-        const completion = (await Promise.race([
-          groq.chat.completions.create({
-            model: model,
-            messages: [
-              {
-                role: "user",
-                content: prompt,
-              },
-            ],
-            temperature: 0.7,
-            max_tokens: 8000,
-          }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 45s")), 45000)),
-        ])) as any
+    const startTime = Date.now()
+    const completion = (await Promise.race([
+      groq.chat.completions.create({
+        model: "llama-3.3-70b-versatile", // Chỉ dùng v25
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.7,
+        max_tokens: 25000,
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 90s")), 90000)),
+    ])) as any
 
-        // Thêm null checks
-        if (!completion?.choices?.[0]?.message?.content) {
-          console.log(`⚠️ Model ${model}: Không nhận được response`)
-          continue
-        }
+    const responseTime = Date.now() - startTime
 
-        const analysis = completion.choices[0].message.content || "Không có phân tích"
-        console.log(`✅ Phân tích thành công với model ${model}`)
-
-        return analysis
-      } catch (modelError) {
-        const errorMsg = modelError instanceof Error ? modelError.message : String(modelError)
-        console.log(`❌ Model ${model}: ${errorMsg}`)
-        continue
-      }
+    if (!completion?.choices?.[0]?.message?.content) {
+      console.log(`⚠️ No response content from v25`)
+      throw new Error("No response content")
     }
 
-    throw new Error("Tất cả models thất bại cho phân tích cuối")
+    const analysis = completion.choices[0].message.content || "Không có phân tích"
+    const outputTokens = estimateTokens(analysis)
+
+    console.log(`✅ ANALYSIS COMPLETE:`)
+    console.log(`  🎯 OUTPUT tokens: ${outputTokens}`)
+    console.log(`  ⚡ Processing time: ${responseTime}ms`)
+    console.log(`  📊 Token efficiency: ${Math.round((outputTokens / promptTokens) * 100)}%`)
+
+    return analysis
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error)
-    console.error(`❌ Phân tích cuối thất bại: ${errorMsg}`)
-    return `❌ Không thể phân tích: ${errorMsg}`
+    console.error(`❌ Analysis failed with v25: ${errorMsg}`)
+    return `❌ Không thể phân tích với v25: ${errorMsg}`
   }
 }
 
-// Function để optimize/compress dữ liệu với 1 API key
+// Thêm detailed error logging trong optimizeDataChunk
 const optimizeDataChunk = async (
   apiKey: string,
   keyIndex: number,
@@ -83,84 +209,113 @@ const optimizeDataChunk = async (
   totalChunks: number,
 ): Promise<{ success: boolean; optimizedData: string; keyIndex: number; error?: string }> => {
   try {
-    console.log(
-      `🔧 Key ${keyIndex + 1}: Đang optimize chunk ${chunkIndex + 1}/${totalChunks} (${dataChunk.length} records)`,
-    )
+    const chunkText = JSON.stringify(dataChunk, null, 2)
+    const estimatedTokens = estimateTokens(chunkText)
 
-    const groq = createGroqClient(apiKey)
-    const rawData = JSON.stringify(dataChunk, null, 2)
+    // 🔥 THÊM: Log chi tiết tokens ngay từ đầu
+    console.log(`\n🔧 ===== CHUNK ${chunkIndex + 1}/${totalChunks} TOKEN ANALYSIS =====`)
+    console.log(`📊 Key ${keyIndex + 1} đang xử lý:`)
+    console.log(`  📝 Records: ${dataChunk.length}`)
+    console.log(`  📄 Characters: ${chunkText.length}`)
+    console.log(`  🎯 INPUT TOKENS: ${estimatedTokens}`)
+    console.log(`  📈 Token/record: ${Math.round(estimatedTokens / dataChunk.length)}`)
+    console.log(`  🔍 Sample record size: ${JSON.stringify(dataChunk[0], null, 1).length} chars`)
 
-    // Prompt để optimize dữ liệu - KHÔNG phân tích, chỉ tối ưu format
-    const optimizePrompt = `Bạn là một data processor chuyên nghiệp. Nhiệm vụ của bạn là OPTIMIZE dữ liệu sau để giảm token nhưng GIỮ NGUYÊN TOÀN BỘ THÔNG TIN:
-
-DỮ LIỆU GỐC (Chunk ${chunkIndex + 1}/${totalChunks}):
-${rawData}
-
-YÊU CẦU:
-1. ✅ GIỮ NGUYÊN tất cả thông tin quan trọng
-2. ✅ Loại bỏ null/empty values không cần thiết  
-3. ✅ Rút gọn format JSON (compact)
-4. ✅ Giữ nguyên recordId và tất cả fields có giá trị
-5. ❌ KHÔNG phân tích, KHÔNG tóm tắt, KHÔNG giải thích
-6. ❌ KHÔNG thay đổi ý nghĩa dữ liệu
-
-CHỈ TRẢ VỀ DỮ LIỆU ĐÃ OPTIMIZE (JSON format), không có text thêm:`
-
-    // Thử các models
-    for (const model of AVAILABLE_MODELS) {
-      try {
-        const completion = (await Promise.race([
-          groq.chat.completions.create({
-            model: model,
-            messages: [
-              {
-                role: "user",
-                content: optimizePrompt,
-              },
-            ],
-            temperature: 0.1, // Thấp để đảm bảo consistency
-            max_tokens: 4000,
-          }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 30s")), 30000)),
-        ])) as any
-
-        // Thêm null checks
-        if (!completion?.choices?.[0]?.message?.content) {
-          console.log(`⚠️ Key ${keyIndex + 1} model ${model}: Không nhận được response`)
-          continue
-        }
-
-        const optimizedData = completion.choices[0].message.content.trim() || ""
-
-        // Validate JSON để đảm bảo output hợp lệ
-        try {
-          JSON.parse(optimizedData)
-          console.log(`✅ Key ${keyIndex + 1} optimize thành công với model ${model}`)
-
-          return {
-            success: true,
-            optimizedData: optimizedData,
-            keyIndex: keyIndex,
-          }
-        } catch (jsonError) {
-          console.log(`⚠️ Key ${keyIndex + 1} model ${model}: Invalid JSON output`)
-          continue
-        }
-      } catch (modelError) {
-        const errorMsg = modelError instanceof Error ? modelError.message : String(modelError)
-        console.log(`❌ Key ${keyIndex + 1} model ${model}: ${errorMsg}`)
-
-        if (errorMsg.includes("rate_limit")) {
-          break // Không thử model khác nếu rate limit
-        }
-        continue
+    // Kiểm tra chunk size trước khi gửi
+    if (estimatedTokens > 8000) {
+      console.log(`❌ CHUNK QUÁ LỚN: ${estimatedTokens} tokens > 8000 limit`)
+      return {
+        success: false,
+        optimizedData: "",
+        keyIndex: keyIndex,
+        error: `Chunk quá lớn: ${estimatedTokens} tokens > 8000 limit`,
       }
     }
 
-    throw new Error("Tất cả models thất bại cho key này")
+    const groq = createGroqClient(apiKey)
+
+    // Prompt ngắn gọn hơn
+    const optimizePrompt = `Optimize JSON - remove nulls, compact format:
+${chunkText}
+Return JSON only:`
+
+    const promptTokens = estimateTokens(optimizePrompt)
+    console.log(`📤 SENDING REQUEST:`)
+    console.log(`  🎯 Total INPUT tokens: ${promptTokens} (prompt + data)`)
+    console.log(`  ⚡ Model: llama-3.3-70b-versatile (v25)`)
+    console.log(`  🔄 Max output tokens: 6000`)
+
+    try {
+      const startTime = Date.now()
+      const completion = (await Promise.race([
+        groq.chat.completions.create({
+          model: "llama-3.3-70b-versatile", // Chỉ dùng v25
+          messages: [{ role: "user", content: optimizePrompt }],
+          temperature: 0.1,
+          max_tokens: 6000,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout 45s")), 45000)),
+      ])) as any
+
+      const responseTime = Date.now() - startTime
+      console.log(`📥 RESPONSE RECEIVED (${responseTime}ms):`)
+
+      if (!completion?.choices?.[0]?.message?.content) {
+        throw new Error("Empty response from API")
+      }
+
+      const optimizedData = completion.choices[0].message.content.trim()
+      const outputTokens = estimateTokens(optimizedData)
+      const compressionRatio = Math.round((outputTokens / estimatedTokens) * 100)
+      const tokensSaved = estimatedTokens - outputTokens
+
+      console.log(`📊 OUTPUT ANALYSIS:`)
+      console.log(`  📄 Response chars: ${optimizedData.length}`)
+      console.log(`  🎯 OUTPUT TOKENS: ${outputTokens}`)
+      console.log(`  📉 Compression: ${compressionRatio}% (${tokensSaved} tokens saved)`)
+      console.log(`  ⚡ Processing time: ${responseTime}ms`)
+
+      // Validate JSON
+      try {
+        const parsed = JSON.parse(optimizedData)
+        const itemCount = Array.isArray(parsed) ? parsed.length : 1
+        console.log(`✅ VALIDATION SUCCESS:`)
+        console.log(`  📊 Valid JSON with ${itemCount} items`)
+        console.log(`  🎯 TOKEN FLOW: ${estimatedTokens} → ${outputTokens} (${compressionRatio}%)`)
+        console.log(`===== END CHUNK ${chunkIndex + 1} =====\n`)
+
+        return {
+          success: true,
+          optimizedData: optimizedData,
+          keyIndex: keyIndex,
+        }
+      } catch (jsonError) {
+        console.log(`❌ JSON VALIDATION FAILED:`)
+        console.log(`  🔍 Response preview: ${optimizedData.substring(0, 200)}...`)
+        throw new Error(`Invalid JSON: ${jsonError}`)
+      }
+    } catch (apiError) {
+      const errorMsg = apiError instanceof Error ? apiError.message : String(apiError)
+      console.log(`❌ API ERROR:`)
+      console.log(`  🚫 Error: ${errorMsg}`)
+      console.log(`  🎯 INPUT tokens attempted: ${estimatedTokens}`)
+
+      // Log chi tiết lỗi API
+      if (errorMsg.includes("rate_limit")) {
+        console.log(`  ⏰ Rate limit exceeded for key ${keyIndex + 1}`)
+      } else if (errorMsg.includes("quota")) {
+        console.log(`  💰 Quota exceeded for key ${keyIndex + 1}`)
+      } else if (errorMsg.includes("timeout")) {
+        console.log(`  ⏱️ Request timeout (45s) for key ${keyIndex + 1}`)
+      } else {
+        console.log(`  🔍 Unknown error for key ${keyIndex + 1}`)
+      }
+
+      throw new Error(errorMsg)
+    }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error)
-    console.error(`❌ Key ${keyIndex + 1} optimize thất bại: ${errorMsg}`)
+    console.error(`❌ CHUNK ${chunkIndex + 1} FAILED: ${errorMsg}`)
 
     return {
       success: false,
@@ -171,6 +326,37 @@ CHỈ TRẢ VỀ DỮ LIỆU ĐÃ OPTIMIZE (JSON format), không có text thêm:
   }
 }
 
+// Function debug optimize process chi tiết
+const debugOptimizeProcess = async (chunk: any[], keyIndex: number): Promise<void> => {
+  try {
+    const chunkText = JSON.stringify(chunk, null, 1)
+    const estimatedTokens = estimateTokens(chunkText)
+
+    console.log(`🔍 DEBUG Chunk ${keyIndex + 1}:`)
+    console.log(`  - Records: ${chunk.length}`)
+    console.log(`  - Characters: ${chunkText.length}`)
+    console.log(`  - Estimated tokens: ${estimatedTokens}`)
+    console.log(`  - Sample record:`, JSON.stringify(chunk[0], null, 1).substring(0, 200) + "...")
+
+    // Test API key trước
+    const apiKey = API_KEYS[keyIndex]
+    const groq = createGroqClient(apiKey)
+
+    console.log(`🧪 Testing key ${keyIndex + 1} với simple request...`)
+    const testResult = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [{ role: "user", content: "Say 'test ok'" }],
+      temperature: 0.1,
+      max_tokens: 10,
+    })
+
+    console.log(`✅ Key ${keyIndex + 1} test result:`, testResult?.choices?.[0]?.message?.content)
+  } catch (error) {
+    console.error(`❌ DEBUG failed for key ${keyIndex + 1}:`, error)
+  }
+}
+
+// Function để optimize/compress dữ liệu với 1 API key
 // Function chính: Data Preprocessing Pipeline
 export const preprocessDataWithPipeline = async (
   data: any[],
@@ -183,26 +369,157 @@ export const preprocessDataWithPipeline = async (
       throw new Error("Không có API keys hợp lệ")
     }
 
-    // BƯỚC 1: Chia dữ liệu thành chunks
-    const chunkSize = Math.ceil(data.length / Math.max(API_KEYS.length - 1, 1)) // Giữ lại 1 key cho phân tích cuối
-    const chunks = []
+    // Test API keys trước
+    console.log(`🧪 Test API keys trước khi bắt đầu...`)
+    const keyTests = await Promise.all(API_KEYS.slice(0, 3).map((key, index) => testSingleChunk([data[0]], index)))
+    const workingKeys = keyTests.filter(Boolean).length
+    console.log(`🔑 ${workingKeys}/${keyTests.length} keys hoạt động`)
 
-    for (let i = 0; i < data.length; i += chunkSize) {
-      chunks.push(data.slice(i, i + chunkSize))
+    if (workingKeys === 0) {
+      throw new Error("Không có API keys nào hoạt động")
     }
 
-    console.log(`📊 BƯỚC 1: Chia ${data.length} records thành ${chunks.length} chunks`)
+    // Thêm sau phần test API keys
+    console.log(`🧪 Test optimize functionality...`)
+    const optimizeTests = await Promise.all(API_KEYS.slice(0, 3).map((key, index) => testOptimizeSimple(index)))
+    const workingOptimizeKeys = optimizeTests.filter(Boolean).length
+    console.log(`🔧 ${workingOptimizeKeys}/${optimizeTests.length} keys có thể optimize`)
 
-    // BƯỚC 2: Optimize từng chunk song song
-    const optimizePromises = chunks.map((chunk, index) => {
-      const keyIndex = index % (API_KEYS.length - 1) // Giữ lại key cuối cho phân tích
-      const apiKey = API_KEYS[keyIndex]
+    if (workingOptimizeKeys === 0) {
+      console.log(`⚠️ Không có key nào có thể optimize, chuyển sang raw data mode`)
 
-      return optimizeDataChunk(apiKey, keyIndex, chunk, index, chunks.length)
+      const rawData = JSON.stringify(data.slice(0, 30), null, 1)
+      return {
+        success: true,
+        optimizedData: rawData,
+        analysis: `⚠️ Không thể optimize dữ liệu (tất cả keys thất bại), sử dụng ${Math.min(30, data.length)} records đầu tiên từ tổng ${data.length} records.`,
+        keyUsage: {
+          totalKeys: API_KEYS.length,
+          optimizeKeys: 0,
+          analysisKey: 1,
+          failedKeys: API_KEYS.length - 1,
+          successRate: "0%",
+          chunks: 0,
+          successfulChunks: 0,
+          finalDataSize: rawData.length,
+          fallback: true,
+        },
+      }
+    }
+
+    // Thêm adaptive chunking
+    console.log(`📊 BƯỚC 1: Adaptive chunking dựa trên working keys (${workingKeys} keys)`)
+    const chunkSize = workingKeys >= 3 ? 4000 : 3000 // Giảm từ 5000 xuống 4000
+    console.log(`📊 Sử dụng chunk size: ${chunkSize} tokens`)
+
+    // BƯỚC 1: Chia dữ liệu thành chunks theo token limit
+    console.log(`📊 BƯỚC 1: Chia dữ liệu theo token limit (4000 tokens/chunk)`)
+    let chunks = chunkDataByTokens(data, chunkSize)
+
+    // Nếu vẫn chỉ có 1 chunk lớn, thử strategy khác
+    if (chunks.length === 1) {
+      const singleChunkTokens = estimateTokens(JSON.stringify(chunks[0], null, 1))
+      console.log(`⚠️ Chỉ có 1 chunk với ${singleChunkTokens} tokens`)
+
+      if (singleChunkTokens > 10000) {
+        console.log(`🔄 Fallback: Chia theo số records thay vì tokens`)
+        // Chia theo số records với chunks nhỏ hơn
+        const recordsPerChunk = Math.max(Math.ceil(data.length / (API_KEYS.length - 1)), 3) // Tối thiểu 3 records/chunk
+        chunks = []
+        for (let i = 0; i < data.length; i += recordsPerChunk) {
+          chunks.push(data.slice(i, i + recordsPerChunk))
+        }
+        console.log(`📊 Fallback result: ${chunks.length} chunks với ~${recordsPerChunk} records/chunk`)
+      }
+    }
+
+    // Log thông tin chi tiết về chunks
+    let totalInputTokens = 0
+    chunks.forEach((chunk, index) => {
+      const chunkText = JSON.stringify(chunk, null, 1)
+      const estimatedTokens = estimateTokens(chunkText)
+      totalInputTokens += estimatedTokens
+      console.log(`📊 Chunk ${index + 1}: ${chunk.length} records, ~${estimatedTokens} tokens`)
     })
 
-    console.log(`⏳ BƯỚC 2: Đang optimize ${chunks.length} chunks song song...`)
-    const optimizeResults = await Promise.all(optimizePromises)
+    console.log(`📊 TOKEN DISTRIBUTION SUMMARY:`)
+    console.log(`  🎯 Total INPUT tokens: ${totalInputTokens}`)
+    console.log(`  📊 Chunks: ${chunks.length}`)
+    console.log(`  📈 Avg tokens/chunk: ${Math.round(totalInputTokens / chunks.length)}`)
+    console.log(`  📋 Avg tokens/record: ${Math.round(totalInputTokens / data.length)}`)
+    console.log(`  ⚡ Model: llama-3.3-70b-versatile (v25) ONLY`)
+    console.log(`  🔧 Max tokens per request: 8000 (safety limit)`)
+
+    // BƯỚC 2: Optimize từng chunk với better error handling
+    console.log(`⏳ BƯỚC 2: Đang optimize ${chunks.length} chunks...`)
+
+    const optimizeResults = []
+
+    // Xử lý từng chunk một để debug tốt hơn
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]
+      const keyIndex = i % (API_KEYS.length - 1)
+
+      console.log(`🔧 Xử lý chunk ${i + 1}/${chunks.length} với key ${keyIndex + 1}`)
+
+      // Debug trước khi optimize
+      await debugOptimizeProcess(chunk, keyIndex)
+
+      let result = null
+      let retryCount = 0
+      const maxRetries = 2
+
+      // Retry mechanism
+      while (retryCount <= maxRetries && (!result || !result.success)) {
+        try {
+          if (retryCount > 0) {
+            console.log(`🔄 Retry ${retryCount}/${maxRetries} cho chunk ${i + 1}`)
+            await new Promise((resolve) => setTimeout(resolve, 2000)) // Wait 2s
+          }
+
+          result = await optimizeDataChunk(API_KEYS[keyIndex], keyIndex, chunk, i, chunks.length)
+
+          if (result && result.success) {
+            console.log(`✅ Chunk ${i + 1}: Thành công sau ${retryCount} retries`)
+            break
+          } else {
+            console.log(`❌ Chunk ${i + 1}: Thất bại lần ${retryCount + 1} - ${result?.error || "Unknown error"}`)
+          }
+        } catch (error) {
+          console.log(`❌ Chunk ${i + 1}: Exception lần ${retryCount + 1} - ${error}`)
+          result = {
+            success: false,
+            optimizedData: "",
+            keyIndex: keyIndex,
+            error: String(error),
+          }
+        }
+
+        retryCount++
+      }
+
+      // Đảm bảo result không null trước khi push
+      if (result) {
+        optimizeResults.push(result)
+      } else {
+        optimizeResults.push({
+          success: false,
+          optimizedData: "",
+          keyIndex: keyIndex,
+          error: "No result after retries",
+        })
+      }
+    }
+
+    // Debug chi tiết kết quả
+    console.log(`🔍 DEBUG: Optimize results details:`)
+    optimizeResults.forEach((result, index) => {
+      if (result.success) {
+        console.log(`✅ Chunk ${index + 1}: Success (Key ${result.keyIndex + 1})`)
+      } else {
+        console.log(`❌ Chunk ${index + 1}: Failed (Key ${result.keyIndex + 1}) - ${result.error}`)
+      }
+    })
 
     // Kiểm tra kết quả optimize
     const successfulOptimizes = optimizeResults.filter((r) => r && r.success)
@@ -210,27 +527,85 @@ export const preprocessDataWithPipeline = async (
 
     console.log(`📊 Optimize results: ${successfulOptimizes.length}/${optimizeResults.length} thành công`)
 
-    if (!successfulOptimizes || successfulOptimizes.length === 0) {
-      throw new Error("Tất cả optimize requests đều thất bại")
+    // Emergency fallback nếu success rate quá thấp
+    if (successfulOptimizes.length > 0 && successfulOptimizes.length < optimizeResults.length * 0.3) {
+      console.log(
+        `⚠️ Success rate thấp (${Math.round((successfulOptimizes.length / optimizeResults.length) * 100)}%), thử với chunks nhỏ hơn`,
+      )
+
+      // Thử lại với chunks 2K tokens
+      console.log(`🔄 Emergency retry với 2K tokens chunks...`)
+      const smallChunks = chunkDataByTokens(data, 2000)
+
+      if (smallChunks.length > chunks.length) {
+        console.log(`📊 Tạo ${smallChunks.length} chunks nhỏ hơn, thử optimize 3 chunks đầu...`)
+
+        for (let i = 0; i < Math.min(3, smallChunks.length); i++) {
+          const smallChunk = smallChunks[i]
+          const keyIndex = i % (API_KEYS.length - 1)
+
+          try {
+            const smallResult = await optimizeDataChunk(API_KEYS[keyIndex], keyIndex, smallChunk, i, 3)
+            if (smallResult.success) {
+              console.log(`✅ Emergency chunk ${i + 1}: Thành công`)
+              successfulOptimizes.push(smallResult)
+            }
+          } catch (error) {
+            console.log(`❌ Emergency chunk ${i + 1}: ${error}`)
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        }
+      }
+    }
+
+    // Nếu tất cả thất bại, thử fallback với raw data
+    if (successfulOptimizes.length === 0) {
+      console.log(`🔄 FALLBACK: Tất cả optimize thất bại, sử dụng raw data`)
+
+      // Sử dụng raw data (rút gọn)
+      const rawData = JSON.stringify(data.slice(0, 20), null, 1) // Chỉ lấy 20 records đầu
+
+      const keyUsage = {
+        totalKeys: API_KEYS.length,
+        optimizeKeys: 0,
+        analysisKey: 1,
+        failedKeys: failedOptimizes.length,
+        successRate: "0%",
+        chunks: chunks.length,
+        successfulChunks: 0,
+        finalDataSize: rawData.length,
+        fallback: true,
+      }
+
+      return {
+        success: true,
+        optimizedData: rawData,
+        analysis: `⚠️ Không thể optimize dữ liệu, sử dụng ${data.slice(0, 20).length} records đầu tiên từ tổng ${data.length} records. Dữ liệu vẫn có thể được phân tích nhưng có thể không đầy đủ.`,
+        keyUsage: keyUsage,
+      }
     }
 
     // BƯỚC 3: Gộp dữ liệu đã optimize
     let combinedOptimizedData = "["
+    let validChunks = 0
+
     successfulOptimizes.forEach((result, index) => {
       // Parse và merge JSON arrays
       try {
         const parsedData = JSON.parse(result.optimizedData)
         const dataArray = Array.isArray(parsedData) ? parsedData : [parsedData]
 
-        if (index > 0) combinedOptimizedData += ","
+        if (validChunks > 0) combinedOptimizedData += ","
         combinedOptimizedData += JSON.stringify(dataArray).slice(1, -1) // Remove [ ]
+        validChunks++
       } catch (parseError) {
-        console.warn(`⚠️ Không thể parse optimize result từ key ${result.keyIndex + 1}`)
+        console.warn(`⚠️ Không thể parse optimize result từ key ${result.keyIndex + 1}:`, parseError)
       }
     })
     combinedOptimizedData += "]"
 
-    console.log(`📊 BƯỚC 3: Đã gộp dữ liệu optimize (${combinedOptimizedData.length} characters)`)
+    console.log(`📊 BƯỚC 3: Đã gộp ${validChunks} chunks optimize (${combinedOptimizedData.length} characters)`)
 
     // BƯỚC 4: Phân tích tổng hợp với key cuối cùng
     const finalKeyIndex = API_KEYS.length - 1
@@ -242,14 +617,14 @@ export const preprocessDataWithPipeline = async (
 
     console.log(`🤖 BƯỚC 4: Phân tích tổng hợp với key ${finalKeyIndex + 1}`)
 
-    const analysisPrompt = `Bạn là một AI analyst chuyên nghiệp. Dưới đây là TOÀN BỘ dữ liệu từ bảng "${tableName}" đã được optimize (${data.length} records):
+    const analysisPrompt = `Bạn là một AI analyst chuyên nghiệp. Dưới đây là dữ liệu từ bảng "${tableName}" đã được optimize (${data.length} records gốc, ${validChunks}/${chunks.length} chunks thành công):
 
 ${combinedOptimizedData}
 
-Đây là dữ liệu HOÀN CHỈNH từ ${data.length} bản ghi, đã được optimize để giảm token nhưng vẫn giữ nguyên toàn bộ thông tin.
+Đây là dữ liệu từ ${data.length} bản ghi gốc, đã được optimize để giảm token nhưng vẫn giữ nguyên thông tin quan trọng.
 
 Hãy phân tích chi tiết:
-1. 📊 Tổng quan về ${data.length} records
+1. 📊 Tổng quan về dữ liệu
 2. 📈 Thống kê quan trọng  
 3. 🔍 Patterns và insights
 4. 💡 Nhận xét và đánh giá
@@ -265,7 +640,7 @@ Trả lời bằng tiếng Việt, chi tiết và có cấu trúc.`
       failedKeys: failedOptimizes.length,
       successRate: `${Math.round((successfulOptimizes.length / optimizeResults.length) * 100)}%`,
       chunks: chunks.length,
-      recordsPerChunk: chunkSize,
+      successfulChunks: validChunks,
       finalDataSize: combinedOptimizedData.length,
     }
 
@@ -362,7 +737,7 @@ export const testAllApiKeys = async (): Promise<{
       const groq = createGroqClient(apiKey)
 
       const testCompletion = await groq.chat.completions.create({
-        model: "llama-3.1-8b-instant",
+        model: "llama-3.3-70b-versatile", // Chỉ test model này
         messages: [
           {
             role: "user",
@@ -370,7 +745,7 @@ export const testAllApiKeys = async (): Promise<{
           },
         ],
         temperature: 0.1,
-        max_tokens: 10,
+        max_tokens: 50, // Nhỏ cho test
       })
 
       // Thêm null checks
