@@ -1,5 +1,5 @@
 "use client"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import {
   getTableData,
   getTableStats,
@@ -8,7 +8,7 @@ import {
   debugTableStructure,
   testTableAccess,
 } from "../lib/base"
-import { preprocessDataWithPipeline, answerQuestionWithData, testAllApiKeys } from "../lib/groqClient"
+import { preprocessDataWithPipeline, answerQuestionWithData } from "../lib/groqClient"
 
 interface ChatBotProps {
   tableId: string
@@ -24,7 +24,6 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [isAsking, setIsAsking] = useState(false)
   const [sdkStatus, setSdkStatus] = useState<string>("")
   const [debugInfo, setDebugInfo] = useState<string>("")
-  const [apiStatus, setApiStatus] = useState<string>("")
   const [autoAnalysis, setAutoAnalysis] = useState<string>("")
   const [isAutoAnalyzing, setIsAutoAnalyzing] = useState(false)
   const [tableStats, setTableStats] = useState<any>(null)
@@ -34,17 +33,15 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const [optimizedData, setOptimizedData] = useState<string>("")
   const [pipelineStage, setPipelineStage] = useState<string>("")
 
+  // 🔥 NEW: Refs để tránh duplicate calls
+  const hasLoadedData = useRef(false)
+  const hasRunPipeline = useRef(false)
+  const isInitializing = useRef(false)
+
   const runDebug = async () => {
     console.log("🔍 Chạy detailed debug...")
     await debugTableStructure(tableId)
     setDebugInfo("Detailed debug completed - check console for comprehensive analysis")
-  }
-
-  const testAPI = async () => {
-    console.log("🧪 Testing all API keys với CSV format...")
-    const result = await testAllApiKeys()
-    setApiStatus(`CSV API Test: ${result.success ? "✅" : "❌"} ${result.message}`)
-    setDebugInfo(`CSV Key details: ${JSON.stringify(result.keyDetails, null, 2)}`)
   }
 
   const testTableAccessFunc = async () => {
@@ -64,9 +61,15 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   }
 
   const loadAllData = async () => {
+    if (hasLoadedData.current) {
+      console.log("⚠️ Data already loaded, skipping...")
+      return
+    }
+
     console.log("📥 Loading ALL data...")
     setLoading(true)
     setLoadingProgress("Đang lấy tất cả dữ liệu...")
+    hasLoadedData.current = true
 
     try {
       const data = await getTableData(tableId)
@@ -79,14 +82,18 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     } catch (err) {
       console.error("❌ Error loading all data:", err)
       setError(`Lỗi khi lấy tất cả dữ liệu: ${err}`)
+      hasLoadedData.current = false // Reset on error
     } finally {
       setLoading(false)
     }
   }
 
-  // 🔥 UPDATED: Function preprocessing pipeline với CSV format
+  // 🔥 UPDATED: Function preprocessing pipeline với CSV format - chỉ chạy 1 lần
   const performDataPreprocessing = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
-    if (data.length === 0) return
+    if (data.length === 0 || hasRunPipeline.current) {
+      console.log("⚠️ Pipeline already run or no data, skipping...")
+      return
+    }
 
     // Kiểm tra xem có dữ liệu thực không
     const hasRealData = data.some((record) =>
@@ -98,7 +105,9 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       return
     }
 
+    hasRunPipeline.current = true
     setIsAutoAnalyzing(true)
+
     try {
       console.log(`🚀 Bắt đầu CSV Data Preprocessing Pipeline với ${data.length} records...`)
 
@@ -118,7 +127,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       setPipelineStage("🤖 Đang phân tích CSV tổng hợp...")
       setLoadingProgress(`Bước 4/4: Phân tích CSV tổng hợp với AI`)
 
-      // Chạy CSV preprocessing pipeline
+      // Chạy CSV preprocessing pipeline - CHỈ 1 LẦN
       const result = await preprocessDataWithPipeline(data, tableName)
 
       if (result.success) {
@@ -138,6 +147,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       setAutoAnalysis("❌ Không thể thực hiện CSV preprocessing pipeline. Vui lòng thử lại.")
       setIsDataReady(false)
       setPipelineStage("❌ CSV Pipeline lỗi")
+      hasRunPipeline.current = false // Reset on error
     } finally {
       setIsAutoAnalyzing(false)
       setLoadingProgress("")
@@ -145,13 +155,22 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     }
   }
 
+  // 🔥 UPDATED: useEffect tối ưu - chỉ chạy 1 lần
   useEffect(() => {
     const loadData = async () => {
+      // Tránh duplicate initialization
+      if (isInitializing.current || hasLoadedData.current) {
+        console.log("⚠️ Already initializing or loaded, skipping...")
+        return
+      }
+
+      isInitializing.current = true
+
       try {
         setLoading(true)
         setError(null)
 
-        // Kiểm tra SDK trước
+        // Kiểm tra SDK trước - CHỈ 1 LẦN
         console.log("🔍 Kiểm tra SDK status...")
         const status = await checkSDKStatus()
         setSdkStatus(`SDK Status: ${status.status} - ${status.message}`)
@@ -160,22 +179,20 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           throw new Error(status.message)
         }
 
-        // Test API keys với CSV format
-        await testAPI()
-
-        // Lấy thống kê bảng trước
+        // Lấy thống kê bảng trước - CHỈ 1 LẦN
         setLoadingProgress("Đang lấy thống kê bảng...")
         const stats = await getTableStats(tableId)
         setTableStats(stats)
         console.log("📊 Table stats:", stats)
 
-        // Lấy TẤT CẢ dữ liệu bảng
+        // Lấy TẤT CẢ dữ liệu bảng - CHỈ 1 LẦN
         setLoadingProgress(`Đang lấy tất cả ${stats.totalRecords} records...`)
         console.log("📥 Bắt đầu lấy TẤT CẢ dữ liệu bảng...")
         const data = await getTableData(tableId)
         console.log("✅ Kết quả cuối cùng:", data)
 
         setTableData(data)
+        hasLoadedData.current = true
 
         if (data.length === 0) {
           setError("Bảng không có dữ liệu hoặc không thể đọc được records. Hãy thử debug để xem chi tiết.")
@@ -186,7 +203,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           )
 
           if (hasRealData) {
-            // Chạy CSV Data Preprocessing Pipeline
+            // Chạy CSV Data Preprocessing Pipeline - CHỈ 1 LẦN
             console.log("🚀 Bắt đầu CSV Data Preprocessing Pipeline...")
             await performDataPreprocessing(data)
           } else {
@@ -197,16 +214,20 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         console.error("❌ Lỗi khi lấy dữ liệu bảng:", err)
         const errorMessage = err instanceof Error ? err.message : String(err)
         setError(`Lỗi: ${errorMessage}`)
+        // Reset flags on error
+        hasLoadedData.current = false
+        hasRunPipeline.current = false
       } finally {
         setLoading(false)
         setLoadingProgress("")
+        isInitializing.current = false
       }
     }
 
-    if (tableId) {
+    if (tableId && !hasLoadedData.current) {
       loadData()
     }
-  }, [tableId, tableName])
+  }, [tableId, tableName]) // Chỉ depend vào tableId và tableName
 
   const handleAskQuestion = async () => {
     if (!question.trim() || tableData.length === 0 || !isDataReady) return
@@ -217,7 +238,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
     try {
       console.log("🤔 Bắt đầu trả lời câu hỏi với CSV optimized data...")
 
-      // Sử dụng CSV optimized data để trả lời câu hỏi
+      // Sử dụng CSV optimized data để trả lời câu hỏi - CHỈ 1 REQUEST
       const response = await answerQuestionWithData(tableData, tableName, question, autoAnalysis, optimizedData)
       setAnswer(response)
       console.log("✅ Đã nhận được câu trả lời từ AI với CSV format")
@@ -231,9 +252,23 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   }
 
   const refreshAnalysis = async () => {
-    if (tableData.length > 0) {
+    if (tableData.length > 0 && !hasRunPipeline.current) {
       await performDataPreprocessing(tableData)
+    } else {
+      console.log("⚠️ Pipeline already completed or no data")
     }
+  }
+
+  // 🔥 NEW: Reset function để clear cache khi cần
+  const resetCache = () => {
+    hasLoadedData.current = false
+    hasRunPipeline.current = false
+    isInitializing.current = false
+    setTableData([])
+    setOptimizedData("")
+    setAutoAnalysis("")
+    setIsDataReady(false)
+    console.log("🔄 Cache cleared")
   }
 
   if (loading) {
@@ -250,7 +285,6 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         )}
         {pipelineStage && <div style={{ fontSize: "12px", color: "#ff6600", marginTop: "5px" }}>{pipelineStage}</div>}
         {sdkStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "10px" }}>{sdkStatus}</div>}
-        {apiStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>{apiStatus}</div>}
         {isAutoAnalyzing && (
           <div style={{ fontSize: "12px", color: "#007acc", marginTop: "5px" }}>
             🚀 Đang chạy CSV Data Preprocessing Pipeline...
@@ -266,7 +300,6 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
       <div style={{ marginBottom: "15px", fontSize: "12px", color: "#666" }}>
         {sdkStatus && <div>✅ {sdkStatus}</div>}
-        {apiStatus && <div>{apiStatus}</div>}
         {tableStats && (
           <div>
             📊 Thống kê: {tableStats.totalRecords} records, {tableStats.totalFields} fields
@@ -308,9 +341,6 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
             <button onClick={runDebug} style={{ marginRight: "10px", fontSize: "12px" }}>
               🔍 Detailed Debug
             </button>
-            <button onClick={testAPI} style={{ marginRight: "10px", fontSize: "12px" }}>
-              🧪 Test CSV APIs
-            </button>
             <button onClick={testTableAccessFunc} style={{ marginRight: "10px", fontSize: "12px" }}>
               🧪 Test Access
             </button>
@@ -319,6 +349,9 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
             </button>
             <button onClick={loadAllData} style={{ marginRight: "10px", fontSize: "12px" }}>
               📥 Load All Data
+            </button>
+            <button onClick={resetCache} style={{ marginRight: "10px", fontSize: "12px" }}>
+              🔄 Reset Cache
             </button>
             <button onClick={() => window.location.reload()} style={{ fontSize: "12px" }}>
               🔄 Thử lại
@@ -341,8 +374,16 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
             <h3 style={{ margin: 0 }}>🚀 CSV Data Preprocessing Pipeline ({tableData.length} records)</h3>
-            <button onClick={refreshAnalysis} disabled={isAutoAnalyzing} style={{ fontSize: "12px" }}>
-              {isAutoAnalyzing ? "🔄 Đang xử lý..." : "🔄 Chạy lại CSV Pipeline"}
+            <button
+              onClick={refreshAnalysis}
+              disabled={isAutoAnalyzing || hasRunPipeline.current}
+              style={{ fontSize: "12px" }}
+            >
+              {isAutoAnalyzing
+                ? "🔄 Đang xử lý..."
+                : hasRunPipeline.current
+                  ? "✅ Đã hoàn thành"
+                  : "🔄 Chạy lại CSV Pipeline"}
             </button>
           </div>
 
@@ -444,17 +485,18 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
             <button onClick={handleAskQuestion} disabled={isAsking || !question.trim() || !isDataReady}>
               {isAsking ? "🤔 Đang suy nghĩ..." : "🚀 Hỏi AI (Optimized CSV)"}
             </button>
-            <button onClick={testAPI} style={{ marginLeft: "10px", fontSize: "12px" }}>
-              🧪 Test CSV Keys
-            </button>
-            <button onClick={refreshAnalysis} style={{ marginLeft: "10px", fontSize: "12px" }}>
-              🔄 Chạy lại CSV Pipeline
+            <button
+              onClick={refreshAnalysis}
+              style={{ marginLeft: "10px", fontSize: "12px" }}
+              disabled={hasRunPipeline.current}
+            >
+              {hasRunPipeline.current ? "✅ Pipeline hoàn thành" : "🔄 Chạy lại CSV Pipeline"}
             </button>
             <button onClick={runDebug} style={{ marginLeft: "10px", fontSize: "12px" }}>
               🔍 Debug
             </button>
-            <button onClick={loadAllData} style={{ marginLeft: "10px", fontSize: "12px" }}>
-              📥 Reload All
+            <button onClick={resetCache} style={{ marginLeft: "10px", fontSize: "12px" }}>
+              🔄 Reset Cache
             </button>
           </div>
 
