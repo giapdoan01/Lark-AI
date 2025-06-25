@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import {
-  getTableData,
+  getTableDataAsCSV,
   getTableStats,
   testTableDataSample,
   checkSDKStatus,
@@ -16,7 +16,7 @@ interface ChatBotProps {
 }
 
 export default function ChatBot({ tableId, tableName }: ChatBotProps) {
-  const [tableData, setTableData] = useState<Array<{ recordId: string; fields: Record<string, unknown> }>>([])
+  const [csvData, setCsvData] = useState<string>("")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [question, setQuestion] = useState("")
@@ -50,7 +50,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   const testTableAccessFunc = async () => {
     console.log("🧪 Testing table access...")
     const result = await testTableAccess(tableId)
-    setDebugInfo(`Table access test: ${result ? "✅ Success" : "❌ Failed"} - Check console for details`)
+    setDebugInfo(`Table access test: ${result? "✅ Success" : "❌ Failed"} - Check console for details`)
   }
 
   const testSample = async () => {
@@ -64,62 +64,60 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   }
 
   const loadAllData = async () => {
-    console.log("📥 Loading ALL data...")
+    console.log("📥 Loading ALL data as CSV...")
     setLoading(true)
-    setLoadingProgress("Đang lấy tất cả dữ liệu...")
+    setLoadingProgress("Đang lấy dữ liệu CSV...")
 
     try {
-      const data = await getTableData(tableId)
-      setTableData(data)
+      const csv = await getTableDataAsCSV(tableId)
+      setCsvData(csv)
       setLoadingProgress("")
 
-      if (data.length > 0) {
-        await performDataPreprocessing(data)
+      if (csv.split("\n").length > 1) {
+        await performDataPreprocessing(csv)
+      } else {
+        setError("Bảng không có dữ liệu hoặc CSV trống.")
       }
     } catch (err) {
-      console.error("❌ Error loading all data:", err)
-      setError(`Lỗi khi lấy tất cả dữ liệu: ${err}`)
+      console.error("❌ Error loading CSV data:", err)
+      setError(`Lỗi khi lấy dữ liệu CSV: ${err}`)
     } finally {
       setLoading(false)
     }
   }
 
-  // Function preprocessing pipeline
-  const performDataPreprocessing = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
-    if (data.length === 0) return
+  const performDataPreprocessing = async (csvData: string) => {
+    if (!csvData.trim()) {
+      setAutoAnalysis("⚠️ Dữ liệu CSV trống. Cần debug để khắc phục.")
+      return
+    }
 
-    // Kiểm tra xem có dữ liệu thực không
-    const hasRealData = data.some((record) =>
-      Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
-    )
+    // Kiểm tra dữ liệu CSV
+    const lines = csvData.split("\n").filter((line) => line.trim())
+    const hasRealData = lines.slice(1).some((line) => line.split(",").some((value) => value.trim() !== ""))
 
     if (!hasRealData) {
-      setAutoAnalysis("⚠️ Dữ liệu chỉ có recordId mà không có thông tin chi tiết fields. Cần debug để khắc phục.")
+      setAutoAnalysis("⚠️ Dữ liệu CSV chỉ có recordId hoặc giá trị rỗng. Cần debug để khắc phục.")
       return
     }
 
     setIsAutoAnalyzing(true)
     try {
-      console.log(`🚀 Bắt đầu Data Preprocessing Pipeline với ${data.length} records...`)
+      console.log(`🚀 Bắt đầu Data Preprocessing Pipeline với ${lines.length - 1} records...`)
 
-      // Stage 1: Chia dữ liệu
       setPipelineStage("📊 Đang chia dữ liệu thành chunks...")
-      setLoadingProgress(`Bước 1/4: Chia ${data.length} records thành chunks`)
+      setLoadingProgress(`Bước 1/4: Chia ${lines.length - 1} records thành chunks`)
 
-      // Stage 2: Optimize
       setPipelineStage("🔧 Đang optimize dữ liệu song song...")
       setLoadingProgress(`Bước 2/4: Optimize dữ liệu với multiple API keys`)
 
-      // Stage 3: Merge
       setPipelineStage("🔄 Đang gộp dữ liệu đã optimize...")
-      setLoadingProgress(`Bước 3/4: Gộp dữ liệu đã optimize`)
+      setLoadingProgress(`Bước 3/4: Gộp dữ liệu CSV đã optimize`)
 
-      // Stage 4: Analyze
       setPipelineStage("🤖 Đang phân tích tổng hợp...")
       setLoadingProgress(`Bước 4/4: Phân tích tổng hợp với AI`)
 
-      // Chạy preprocessing pipeline
-      const result = await preprocessDataWithPipeline(data, tableName)
+      const result = await preprocessDataWithPipeline(csvData, tableName)
 
       if (result.success) {
         setOptimizedData(result.optimizedData)
@@ -129,6 +127,8 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         setPipelineStage("✅ Pipeline hoàn thành!")
         console.log("✅ Hoàn thành Data Preprocessing Pipeline")
       } else {
+        setAutoAnalysis
+
         setAutoAnalysis(result.analysis)
         setIsDataReady(false)
         setPipelineStage("❌ Pipeline thất bại")
@@ -151,7 +151,6 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         setLoading(true)
         setError(null)
 
-        // Kiểm tra SDK trước
         console.log("🔍 Kiểm tra SDK status...")
         const status = await checkSDKStatus()
         setSdkStatus(`SDK Status: ${status.status} - ${status.message}`)
@@ -160,41 +159,33 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           throw new Error(status.message)
         }
 
-        // Test API keys
         await testAPI()
 
-        // Lấy thống kê bảng trước
         setLoadingProgress("Đang lấy thống kê bảng...")
         const stats = await getTableStats(tableId)
         setTableStats(stats)
         console.log("📊 Table stats:", stats)
 
-        // Lấy TẤT CẢ dữ liệu bảng
-        setLoadingProgress(`Đang lấy tất cả ${stats.totalRecords} records...`)
-        console.log("📥 Bắt đầu lấy TẤT CẢ dữ liệu bảng...")
-        const data = await getTableData(tableId)
-        console.log("✅ Kết quả cuối cùng:", data)
+        setLoadingProgress(`Đang lấy dữ liệu CSV (${stats.totalRecords} records)...`)
+        console.log("📥 Bắt đầu lấy dữ liệu CSV...")
+        const csv = await getTableDataAsCSV(tableId)
+        console.log("✅ Đã lấy dữ liệu CSV:", csv.slice(0, 100) + "...")
 
-        setTableData(data)
+        setCsvData(csv)
 
-        if (data.length === 0) {
-          setError("Bảng không có dữ liệu hoặc không thể đọc được records. Hãy thử debug để xem chi tiết.")
+        if (csv.split("\n").length <= 1) {
+          setError("Bảng không có dữ liệu hoặc CSV trống. Hãy thử debug để xem chi tiết.")
         } else {
-          // Kiểm tra xem có dữ liệu thực không
-          const hasRealData = data.some((record) =>
-            Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
-          )
-
+          const hasRealData = csv.split("\n").slice(1).some((line) => line.split(",").some((value) => value.trim() !== ""))
           if (hasRealData) {
-            // Chạy Data Preprocessing Pipeline
             console.log("🚀 Bắt đầu Data Preprocessing Pipeline...")
-            await performDataPreprocessing(data)
+            await performDataPreprocessing(csv)
           } else {
-            setError("Đã lấy được records nhưng không có thông tin chi tiết fields. Vui lòng chạy debug để khắc phục.")
+            setError("Đã lấy được CSV nhưng không có thông tin chi tiết. Vui lòng chạy debug để khắc phục.")
           }
         }
       } catch (err) {
-        console.error("❌ Lỗi khi lấy dữ liệu bảng:", err)
+        console.error("❌ Lỗi khi lấy dữ liệu:", err)
         const errorMessage = err instanceof Error ? err.message : String(err)
         setError(`Lỗi: ${errorMessage}`)
       } finally {
@@ -209,16 +200,14 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   }, [tableId, tableName])
 
   const handleAskQuestion = async () => {
-    if (!question.trim() || tableData.length === 0 || !isDataReady) return
+    if (!question.trim() || !csvData || !isDataReady) return
 
     setIsAsking(true)
-    setAnswer("") // Clear previous answer
+    setAnswer("")
 
     try {
-      console.log("🤔 Bắt đầu trả lời câu hỏi với optimized data...")
-
-      // Sử dụng optimized data để trả lời câu hỏi
-      const response = await answerQuestionWithData(tableData, tableName, question, autoAnalysis, optimizedData)
+      console.log("🤔 Bắt đầu trả lời câu hỏi với optimized CSV...")
+      const response = await answerQuestionWithData(csvData, tableName, question, autoAnalysis, optimizedData)
       setAnswer(response)
       console.log("✅ Đã nhận được câu trả lời từ AI")
     } catch (err) {
@@ -231,8 +220,8 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
   }
 
   const refreshAnalysis = async () => {
-    if (tableData.length > 0) {
-      await performDataPreprocessing(tableData)
+    if (csvData) {
+      await performDataPreprocessing(csvData)
     }
   }
 
@@ -280,7 +269,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         )}
         {optimizedData && (
           <div style={{ color: "green" }}>
-            ✅ Optimized data: {optimizedData.length} characters (từ {tableData.length} records)
+            ✅ Optimized CSV: {optimizedData.length} characters (từ {csvData.split("\n").length - 1} records)
           </div>
         )}
         {isDataReady && <div style={{ color: "green" }}>✅ Data Pipeline hoàn thành - Sẵn sàng trả lời câu hỏi!</div>}
@@ -321,7 +310,6 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         </div>
       )}
 
-      {/* Data Preprocessing Pipeline Status */}
       {(autoAnalysis || isAutoAnalyzing) && (
         <div
           style={{
@@ -333,7 +321,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <h3 style={{ margin: 0 }}>🚀 Data Preprocessing Pipeline ({tableData.length} records)</h3>
+            <h3 style={{ margin: 0 }}>🚀 Data Preprocessing Pipeline ({csvData.split("\n").length - 1} records)</h3>
             <button onClick={refreshAnalysis} disabled={isAutoAnalyzing} style={{ fontSize: "12px" }}>
               {isAutoAnalyzing ? "🔄 Đang xử lý..." : "🔄 Chạy lại Pipeline"}
             </button>
@@ -341,16 +329,16 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
 
           {isAutoAnalyzing ? (
             <div>
-              <div>🚀 Đang chạy Data Preprocessing Pipeline với {tableData.length} records...</div>
+              <div>🚀 Đang chạy Data Preprocessing Pipeline với {csvData.split("\n").length - 1} records...</div>
               {pipelineStage && <div style={{ marginTop: "5px", fontStyle: "italic" }}>{pipelineStage}</div>}
               <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
                 <strong>Pipeline Steps:</strong>
                 <br />
-                1. 📊 Chia dữ liệu → chunks
+                1. 📊 Chia dữ liệu CSV → chunks
                 <br />
                 2. 🔧 Optimize song song → giảm tokens
                 <br />
-                3. 🔄 Gộp dữ liệu → hoàn chỉnh
+                3. 🔄 Gộp dữ liệu CSV → hoàn chỉnh
                 <br />
                 4. 🤖 Phân tích tổng hợp → insights
               </div>
@@ -362,8 +350,8 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       )}
 
       <div style={{ marginBottom: "20px" }}>
-        <h3>📋 Dữ liệu bảng ({tableData.length} bản ghi):</h3>
-        {tableData.length === 0 ? (
+        <h3>📋 Dữ liệu bảng ({csvData.split("\n").length - 1} bản ghi):</h3>
+        {csvData.split("\n").length <= 1 ? (
           <div style={{ padding: "20px", backgroundColor: "#f9f9f9", borderRadius: "6px", textAlign: "center" }}>
             <p>⚠️ Không có dữ liệu để hiển thị</p>
             <p style={{ fontSize: "12px", color: "#666" }}>Có thể bảng trống hoặc có vấn đề với quyền truy cập</p>
@@ -377,7 +365,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         ) : (
           <details>
             <summary style={{ cursor: "pointer", padding: "10px", backgroundColor: "#f9f9f9", borderRadius: "6px" }}>
-              📊 Xem dữ liệu chi tiết ({tableData.length} records) - Click để mở/đóng
+              📊 Xem dữ liệu CSV ({csvData.split("\n").length - 1} records) - Click để mở/đóng
             </summary>
             <pre
               style={{
@@ -391,32 +379,31 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
                 marginTop: "10px",
               }}
             >
-              {JSON.stringify(tableData.slice(0, 5), null, 2)}
-              {tableData.length > 5 && `\n\n... và ${tableData.length - 5} records khác`}
+              {csvData.split("\n").slice(0, 6).join("\n")}
+              {csvData.split("\n").length > 6 && `\n\n... và ${csvData.split("\n").length - 6} records khác`}
             </pre>
           </details>
         )}
       </div>
 
-      {tableData.length > 0 && (
+      {csvData.split("\n").length > 1 && (
         <div>
           <h3>🤖 Hỏi AI về dữ liệu:</h3>
           <div style={{ marginBottom: "10px", fontSize: "12px", color: "#666" }}>
             {isDataReady ? (
               <>
-                ✅ Data Pipeline hoàn thành! AI đã nhận được TOÀN BỘ {tableData.length} records đã optimize.
-                <br />🔍 Ví dụ: &quot;Phân tích theo phòng ban&quot;, &quot;Thống kê tài sản&quot;, &quot;Tìm xu
-                hướng&quot;
-                <br />📊 Optimized data: {optimizedData.length} characters
+                ✅ Data Pipeline hoàn thành! AI đã nhận được TOÀN BỘ {csvData.split("\n").length - 1} records đã optimize.
+                <br />🔍 Ví dụ: &quot;Phân tích theo phòng ban&quot;, &quot;Thống kê tài sản&quot;, &quot;Tìm xu hướng&quot;
+                <br />📊 Optimized CSV: {optimizedData.length} characters
               </>
             ) : (
               <>
                 ⏳ Đang chạy Data Preprocessing Pipeline... Vui lòng chờ.
-                <br />📊 {tableData.length} records đang được optimize và phân tích.
+                <br />📊 {csvData.split("\n").length - 1} records đang được optimize và phân tích.
               </>
             )}
           </div>
-          <textarea
+      <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="Ví dụ: Phân tích dữ liệu theo phòng ban, thống kê tài sản, tìm các mẫu dữ liệu..."
@@ -426,7 +413,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           />
           <div style={{ marginBottom: "10px" }}>
             <button onClick={handleAskQuestion} disabled={isAsking || !question.trim() || !isDataReady}>
-              {isAsking ? "🤔 Đang suy nghĩ..." : "🚀 Hỏi AI (Optimized Data)"}
+              {isAsking ? "🤔 Đang suy nghĩ..." : "🚀 Hỏi AI (Optimized CSV)"}
             </button>
             <button onClick={testAPI} style={{ marginLeft: "10px", fontSize: "12px" }}>
               🧪 Test Keys
@@ -452,7 +439,7 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
                 border: `1px solid ${answer.includes("❌") ? "#ff4444" : "#4caf50"}`,
               }}
             >
-              <h4>💡 Câu trả lời từ AI (Optimized Pipeline - {tableData.length} records):</h4>
+              <h4>💡 Câu trả lời từ AI (Optimized CSV - {csvData.split("\n").length - 1} records):</h4>
               <div style={{ whiteSpace: "pre-wrap" }}>{answer}</div>
             </div>
           )}
