@@ -9,9 +9,11 @@ const API_KEYS = [
   process.env.NEXT_PUBLIC_GROQ_API_KEY_5 || "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",
 ].filter((key) => key && !key.includes("account") && key.startsWith("gsk_"))
 
+// 🔥 FIXED: Sử dụng chính xác compound-beta models
 const AVAILABLE_MODELS = [
-  "compound-beta", // Primary model với unlimited tokens
-  "compound-beta-mini", // Backup model với unlimited tokens
+  "compound-beta", // Model chính user muốn dùng
+  "compound-beta-mini", // Model backup user muốn dùng
+  "llama-3.1-8b-instant", // Fallback nếu compound models fail
 ]
 
 // 🔥 FIXED: Separate caches for different data types
@@ -22,6 +24,88 @@ const detailedTestCache = new Map<string, any>() // Detailed test results
 // Function ước tính số tokens (1 token ≈ 4 characters)
 const estimateTokens = (text: string): number => {
   return Math.ceil(text.length / 4)
+}
+
+// 🔥 NEW: Debug function để kiểm tra model thực sự được gọi
+const debugModelCall = async (apiKey: string, modelName: string): Promise<void> => {
+  try {
+    console.log(`🔍 DEBUG: Testing model "${modelName}" với API key ${apiKey.substring(0, 10)}...`)
+
+    const groq = createGroqClient(apiKey)
+
+    const testCompletion = await groq.chat.completions.create({
+      model: modelName,
+      messages: [
+        {
+          role: "user",
+          content: "What model are you? Return only the model name.",
+        },
+      ],
+      temperature: 0.1,
+      max_tokens: 50,
+    })
+
+    const response = testCompletion?.choices?.[0]?.message?.content
+    console.log(`🔍 DEBUG: Requested model: "${modelName}"`)
+    console.log(`🔍 DEBUG: Response: "${response}"`)
+    console.log(`🔍 DEBUG: Full completion object:`, JSON.stringify(testCompletion, null, 2))
+  } catch (error) {
+    console.error(`🔍 DEBUG: Model "${modelName}" failed:`, error)
+  }
+}
+
+// 🔥 NEW: Function test tất cả models để tìm model nào hoạt động
+const testAvailableModels = async (): Promise<string[]> => {
+  const modelsToTest = [
+    "compound-beta",
+    "compound-beta-mini",
+    "llama-3.1-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768",
+  ]
+
+  const workingModels: string[] = []
+
+  console.log(`🧪 Testing ${modelsToTest.length} models...`)
+
+  for (const modelName of modelsToTest) {
+    try {
+      const groq = createGroqClient(API_KEYS[0]) // Test với key đầu tiên
+
+      console.log(`🧪 Testing model: ${modelName}`)
+
+      const testCompletion = await groq.chat.completions.create({
+        model: modelName,
+        messages: [
+          {
+            role: "user",
+            content: "Test: Return 'OK'",
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 5,
+      })
+
+      const response = testCompletion?.choices?.[0]?.message?.content
+      if (response) {
+        console.log(`✅ Model "${modelName}" works: ${response}`)
+        workingModels.push(modelName)
+
+        // Debug thêm để xem model thực sự
+        await debugModelCall(API_KEYS[0], modelName)
+      } else {
+        console.log(`❌ Model "${modelName}" no response`)
+      }
+
+      // Delay giữa các test
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    } catch (error) {
+      console.error(`❌ Model "${modelName}" failed:`, error)
+    }
+  }
+
+  console.log(`✅ Working models: ${workingModels.join(", ")}`)
+  return workingModels
 }
 
 // 🔥 NEW: CSV Conversion Functions
@@ -144,7 +228,7 @@ const calculateTokenDistribution = (
   console.log(`📄 CSV size: ${csvContent.length} chars (${csvTokens} tokens)`)
   console.log(`📉 CSV Compression: ${compressionRatio}% (${100 - compressionRatio}% token reduction)`)
   console.log(`📊 Tokens per API (4 APIs): ${tokensPerAPI}`)
-  console.log(`⚡ Model: compound-beta`)
+  console.log(`⚡ Target Model: compound-beta`)
 
   // Chia data thành 4 phần dựa trên record count (vì CSV format đồng nhất hơn)
   const recordsPerAPI = Math.min(Math.ceil(data.length / 4), 15) // Tăng lên 15 records per API
@@ -202,9 +286,9 @@ const testSingleChunkCSV = async (chunk: any[], keyIndex: number): Promise<boole
 
     const groq = createGroqClient(apiKey)
 
-    // Test với prompt đơn giản - CHỈ 1 REQUEST
+    // 🔥 FIXED: Thử compound-beta trước
     const testCompletion = await groq.chat.completions.create({
-      model: "compound-beta",
+      model: "compound-beta", // Sử dụng chính xác model user muốn
       messages: [
         {
           role: "user",
@@ -221,12 +305,42 @@ const testSingleChunkCSV = async (chunk: any[], keyIndex: number): Promise<boole
     // Cache boolean result
     testResultsCache.set(cacheKey, success)
 
-    console.log(`✅ Key ${keyIndex + 1} CSV test: ${success ? "OK" : "FAILED"}`)
+    console.log(`✅ Key ${keyIndex + 1} compound-beta test: ${success ? "OK" : "FAILED"}`)
+    console.log(`🔍 Response: "${response}"`)
+
     return success
   } catch (error) {
-    console.log(`❌ Key ${keyIndex + 1} CSV test failed: ${error}`)
-    testResultsCache.set(cacheKey, false)
-    return false
+    console.log(`❌ Key ${keyIndex + 1} compound-beta test failed: ${error}`)
+
+    // 🔥 FALLBACK: Thử compound-beta-mini
+    try {
+      console.log(`🔄 Trying compound-beta-mini fallback for API ${keyIndex + 1}`)
+      const groq = createGroqClient(API_KEYS[keyIndex])
+
+      const fallbackCompletion = await groq.chat.completions.create({
+        model: "compound-beta-mini",
+        messages: [
+          {
+            role: "user",
+            content: "Test: Return 'OK'",
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 5,
+      })
+
+      const fallbackResponse = fallbackCompletion?.choices?.[0]?.message?.content
+      const fallbackSuccess = !!fallbackResponse
+
+      testResultsCache.set(cacheKey, fallbackSuccess)
+      console.log(`✅ Key ${keyIndex + 1} compound-beta-mini fallback: ${fallbackSuccess ? "OK" : "FAILED"}`)
+
+      return fallbackSuccess
+    } catch (fallbackError) {
+      console.log(`❌ Key ${keyIndex + 1} compound-beta-mini also failed: ${fallbackError}`)
+      testResultsCache.set(cacheKey, false)
+      return false
+    }
   }
 }
 
@@ -237,56 +351,71 @@ const createGroqClient = (apiKey: string): Groq => {
   })
 }
 
-// 🔥 UPDATED: Helper function để phân tích với CSV format
+// 🔥 UPDATED: Helper function để phân tích với compound-beta models
 const analyzeWithSingleKey = async (apiKey: string, keyIndex: number, prompt: string): Promise<string> => {
-  try {
-    const promptTokens = estimateTokens(prompt)
-    console.log(`🤖 FINAL ANALYSIS với API 5 (Key ${keyIndex + 1}):`)
-    console.log(`  🎯 Analysis INPUT tokens: ${promptTokens}`)
-    console.log(`  ⚡ Model: compound-beta (unlimited tokens)`)
-    console.log(`  📊 Format: CSV`)
+  // 🔥 FIXED: Thử compound models trước
+  const modelsToTry = ["compound-beta", "compound-beta-mini", "llama-3.1-8b-instant"]
 
-    const groq = createGroqClient(apiKey)
+  for (const modelName of modelsToTry) {
+    try {
+      const promptTokens = estimateTokens(prompt)
+      console.log(`🤖 ANALYSIS với API 5 (Key ${keyIndex + 1}) - Model: ${modelName}:`)
+      console.log(`  🎯 Analysis INPUT tokens: ${promptTokens}`)
 
-    const startTime = Date.now()
+      const groq = createGroqClient(apiKey)
+      const startTime = Date.now()
 
-    // CHỈ 1 REQUEST DUY NHẤT
-    const completion = await groq.chat.completions.create({
-      model: "compound-beta",
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 4000,
-    })
+      // 🔍 DEBUG: Log model request
+      console.log(`🔍 DEBUG: Requesting model "${modelName}"`)
 
-    const responseTime = Date.now() - startTime
+      const completion = await groq.chat.completions.create({
+        model: modelName,
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.7,
+        max_tokens: 4000,
+      })
 
-    if (!completion?.choices?.[0]?.message?.content) {
-      console.log(`⚠️ No response content from compound-beta`)
-      throw new Error("No response content")
+      const responseTime = Date.now() - startTime
+
+      // 🔍 DEBUG: Log actual response
+      console.log(`🔍 DEBUG: Response received from model request "${modelName}"`)
+      console.log(`🔍 DEBUG: Completion model field:`, completion.model)
+
+      if (!completion?.choices?.[0]?.message?.content) {
+        console.log(`⚠️ No response content from ${modelName}`)
+        continue // Try next model
+      }
+
+      const analysis = completion.choices[0].message.content || "Không có phân tích"
+      const outputTokens = estimateTokens(analysis)
+
+      console.log(`✅ CSV ANALYSIS SUCCESS with ${modelName}:`)
+      console.log(`  🎯 OUTPUT tokens: ${outputTokens}`)
+      console.log(`  ⚡ Processing time: ${responseTime}ms`)
+      console.log(`  🔍 Actual model used: ${completion.model || "unknown"}`)
+
+      return analysis
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      console.error(`❌ Model ${modelName} failed: ${errorMsg}`)
+
+      if (modelName === modelsToTry[modelsToTry.length - 1]) {
+        // Last model failed
+        return `❌ Tất cả models đều thất bại. Lỗi cuối: ${errorMsg}`
+      }
+      // Continue to next model
     }
-
-    const analysis = completion.choices[0].message.content || "Không có phân tích"
-    const outputTokens = estimateTokens(analysis)
-
-    console.log(`✅ CSV ANALYSIS COMPLETE:`)
-    console.log(`  🎯 OUTPUT tokens: ${outputTokens}`)
-    console.log(`  ⚡ Processing time: ${responseTime}ms`)
-    console.log(`  📊 Token efficiency: ${Math.round((outputTokens / promptTokens) * 100)}%`)
-
-    return analysis
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error)
-    console.error(`❌ CSV Analysis failed with compound-beta: ${errorMsg}`)
-    return `❌ Không thể phân tích CSV với compound-beta: ${errorMsg}`
   }
+
+  return "❌ Không thể phân tích với bất kỳ model nào"
 }
 
-// 🔥 UPDATED: Optimize data chunk với CSV format - CHỈ 1 REQUEST
+// 🔥 UPDATED: Optimize data chunk với compound-beta models
 const optimizeDataChunk = async (
   apiKey: string,
   keyIndex: number,
@@ -333,20 +462,37 @@ Return clean CSV only:`
     const promptTokens = estimateTokens(optimizePrompt)
     console.log(`📤 SENDING CSV REQUEST:`)
     console.log(`  🎯 Total INPUT tokens: ${promptTokens}`)
-    console.log(`  ⚡ Model: compound-beta (unlimited tokens)`)
+    console.log(`  ⚡ Target Model: compound-beta`)
 
     const startTime = Date.now()
 
-    // CHỈ 1 REQUEST DUY NHẤT - KHÔNG RETRY
-    const completion = await groq.chat.completions.create({
-      model: "compound-beta",
-      messages: [{ role: "user", content: optimizePrompt }],
-      temperature: 0.1,
-      max_tokens: 2000,
-    })
+    // 🔥 FIXED: Thử compound-beta trước
+    let completion
+    let actualModel = "unknown"
+
+    try {
+      console.log(`🔍 DEBUG: Requesting compound-beta for optimization`)
+      completion = await groq.chat.completions.create({
+        model: "compound-beta",
+        messages: [{ role: "user", content: optimizePrompt }],
+        temperature: 0.1,
+        max_tokens: 2000,
+      })
+      actualModel = "compound-beta"
+    } catch (error) {
+      console.log(`⚠️ compound-beta failed, trying compound-beta-mini: ${error}`)
+      completion = await groq.chat.completions.create({
+        model: "compound-beta-mini",
+        messages: [{ role: "user", content: optimizePrompt }],
+        temperature: 0.1,
+        max_tokens: 2000,
+      })
+      actualModel = "compound-beta-mini"
+    }
 
     const responseTime = Date.now() - startTime
-    console.log(`📥 CSV RESPONSE RECEIVED (${responseTime}ms):`)
+    console.log(`📥 CSV RESPONSE RECEIVED (${responseTime}ms) from ${actualModel}:`)
+    console.log(`🔍 DEBUG: Completion model field:`, completion.model)
 
     if (!completion?.choices?.[0]?.message?.content) {
       throw new Error("Empty response from API")
@@ -361,6 +507,7 @@ Return clean CSV only:`
     console.log(`  🎯 OUTPUT TOKENS: ${outputTokens}`)
     console.log(`  📉 Compression: ${compressionRatio}%`)
     console.log(`  ⚡ Processing time: ${responseTime}ms`)
+    console.log(`  🔍 Actual model used: ${completion.model || actualModel}`)
 
     // Validate optimized CSV
     const optimizedValidation = validateCSV(optimizedCSV)
@@ -403,6 +550,11 @@ export const preprocessDataWithPipeline = async (
     if (!API_KEYS || API_KEYS.length < 5) {
       throw new Error("Cần ít nhất 5 API keys (4 cho optimize + 1 cho analysis)")
     }
+
+    // 🔥 DEBUG: Test available models first
+    console.log(`🔍 DEBUG: Testing available models...`)
+    const workingModels = await testAvailableModels()
+    console.log(`✅ Working models: ${workingModels.join(", ")}`)
 
     // 🔥 BƯỚC 1: Tính toán CSV token distribution
     console.log(`📊 BƯỚC 1: Tính toán CSV token distribution...`)
@@ -542,6 +694,7 @@ Trả lời bằng tiếng Việt, chi tiết và có cấu trúc.`
       finalTokens: finalTokens,
       format: "CSV",
       csvCompressionVsJson: `${tokenDistribution.compressionRatio}%`,
+      workingModels: workingModels,
     }
 
     return {
@@ -625,7 +778,7 @@ export const testAllApiKeys = async (): Promise<{
   totalKeys: number
   keyDetails: any[]
 }> => {
-  console.log(`🧪 Testing ${API_KEYS.length} API keys với CSV format...`)
+  console.log(`🧪 Testing ${API_KEYS.length} API keys với compound-beta models...`)
 
   // CHỈ TEST 1 LẦN với proper type handling
   const testPromises = API_KEYS.map(async (apiKey, index) => {
@@ -640,6 +793,8 @@ export const testAllApiKeys = async (): Promise<{
     try {
       const groq = createGroqClient(apiKey)
 
+      // 🔥 FIXED: Test với compound-beta
+      console.log(`🧪 Testing API ${index + 1} with compound-beta`)
       const testCompletion = await groq.chat.completions.create({
         model: "compound-beta",
         messages: [
@@ -653,7 +808,8 @@ export const testAllApiKeys = async (): Promise<{
       })
 
       const response = testCompletion?.choices?.[0]?.message?.content || "No response"
-      console.log(`✅ CSV API ${index + 1}: OK`)
+      console.log(`✅ CSV API ${index + 1}: OK with compound-beta`)
+      console.log(`🔍 DEBUG: Actual model used: ${testCompletion.model}`)
 
       const result = {
         keyIndex: index + 1,
@@ -661,6 +817,7 @@ export const testAllApiKeys = async (): Promise<{
         response: response,
         preview: `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`,
         role: index < 4 ? "CSV optimize" : "CSV analysis",
+        actualModel: testCompletion.model || "compound-beta",
       }
 
       // Cache detailed result
@@ -670,21 +827,61 @@ export const testAllApiKeys = async (): Promise<{
 
       return result
     } catch (error) {
-      console.log(`❌ CSV API ${index + 1}: ${error}`)
-      const result = {
-        keyIndex: index + 1,
-        status: "failed" as const,
-        error: error instanceof Error ? error.message : String(error),
-        preview: `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`,
-        role: index < 4 ? "CSV optimize" : "CSV analysis",
+      console.log(`❌ CSV API ${index + 1} compound-beta failed: ${error}`)
+
+      // 🔥 FALLBACK: Try compound-beta-mini
+      try {
+        console.log(`🔄 Trying compound-beta-mini for API ${index + 1}`)
+        const groq = createGroqClient(apiKey)
+
+        const fallbackCompletion = await groq.chat.completions.create({
+          model: "compound-beta-mini",
+          messages: [
+            {
+              role: "user",
+              content: "Test: Return 'OK'",
+            },
+          ],
+          temperature: 0.1,
+          max_tokens: 5,
+        })
+
+        const response = fallbackCompletion?.choices?.[0]?.message?.content || "No response"
+        console.log(`✅ CSV API ${index + 1}: OK with compound-beta-mini`)
+        console.log(`🔍 DEBUG: Actual model used: ${fallbackCompletion.model}`)
+
+        const result = {
+          keyIndex: index + 1,
+          status: "success" as const,
+          response: response,
+          preview: `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`,
+          role: index < 4 ? "CSV optimize" : "CSV analysis",
+          actualModel: fallbackCompletion.model || "compound-beta-mini",
+        }
+
+        // Cache detailed result
+        detailedTestCache.set(cacheKey, result)
+        // Also cache boolean result for other functions
+        testResultsCache.set(`test_${index}`, true)
+
+        return result
+      } catch (fallbackError) {
+        console.log(`❌ CSV API ${index + 1} compound-beta-mini also failed: ${fallbackError}`)
+        const result = {
+          keyIndex: index + 1,
+          status: "failed" as const,
+          error: error instanceof Error ? error.message : String(error),
+          preview: `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`,
+          role: index < 4 ? "CSV optimize" : "CSV analysis",
+        }
+
+        // Cache detailed result
+        detailedTestCache.set(cacheKey, result)
+        // Also cache boolean result for other functions
+        testResultsCache.set(`test_${index}`, false)
+
+        return result
       }
-
-      // Cache detailed result
-      detailedTestCache.set(cacheKey, result)
-      // Also cache boolean result for other functions
-      testResultsCache.set(`test_${index}`, false)
-
-      return result
     }
   })
 
@@ -693,7 +890,7 @@ export const testAllApiKeys = async (): Promise<{
 
   return {
     success: workingKeys > 0,
-    message: `${workingKeys}/${API_KEYS.length} API keys hoạt động với CSV format (4 optimize + 1 analysis)`,
+    message: `${workingKeys}/${API_KEYS.length} API keys hoạt động với compound-beta models (4 optimize + 1 analysis)`,
     workingKeys: workingKeys,
     totalKeys: API_KEYS.length,
     keyDetails: results,
@@ -745,3 +942,6 @@ export const clearApiCache = () => {
   detailedTestCache.clear()
   console.log("🔄 API cache cleared")
 }
+
+// 🔥 NEW: Export debug functions
+export { testAvailableModels, debugModelCall }
