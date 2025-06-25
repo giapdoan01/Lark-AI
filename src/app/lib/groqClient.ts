@@ -4,8 +4,8 @@ import { Groq } from "groq-sdk"
 const API_KEYS = [
   process.env.NEXT_PUBLIC_GROQ_API_KEY_1 || "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",
   process.env.NEXT_PUBLIC_GROQ_API_KEY_2 || "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",
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_3 || "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",
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_4 || "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",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_3 || "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",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_4 || "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",
   process.env.NEXT_PUBLIC_GROQ_API_KEY_5 || "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",
 ].filter((key) => key && !key.includes("account") && key.startsWith("gsk_"))
 

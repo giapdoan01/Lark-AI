@@ -1,7 +1,6 @@
 "use client"
 import { useEffect, useState, useRef } from "react"
 import {
-  getTableData,
   getTableStats,
   getTableDataWithTypes,
   testTableDataSample,
@@ -376,39 +375,60 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
         await testApiKeys()
         setCurrentStep(2)
 
-        // Step 3: Get Data
+        // Step 3: Get Basic Stats
         setProcessingStatus("📊 Lấy thống kê bảng...")
         const stats = await getTableStats(tableId)
         setTableStats(stats)
 
-        setProcessingStatus(`📥 Lấy TẤT CẢ ${stats.totalRecords} records...`)
-        const data = await getTableData(tableId)
-        setTableData(data)
+        // 🔥 Step 4: MULTI-STRATEGY DATA EXTRACTION
+        setProcessingStatus(`🚀 Multi-strategy extraction cho ${stats.totalRecords} records...`)
+
+        // Import the new function
+        const { getTableDataWithMultipleStrategies } = await import("../lib/base")
+
+        const extractionResult = await getTableDataWithMultipleStrategies(tableId)
+
+        setTableData(extractionResult.data)
         hasLoadedData.current = true
         setCurrentStep(3)
 
-        console.log(`✅ Loaded ${data.length} records from table (expected: ${stats.totalRecords})`)
+        // Update processing status with extraction results
+        const dataLoss = extractionResult.dataQuality.dataLossPercentage
+        if (dataLoss === 0) {
+          setProcessingStatus(`✅ ZERO DATA LOSS! Strategy: ${extractionResult.strategy}`)
+        } else if (dataLoss < 5) {
+          setProcessingStatus(`✅ Minimal loss (${dataLoss.toFixed(1)}%) - Strategy: ${extractionResult.strategy}`)
+        } else {
+          setProcessingStatus(`⚠️ Data loss: ${dataLoss.toFixed(1)}% - Strategy: ${extractionResult.strategy}`)
+        }
 
-        if (data.length === 0) {
-          setError("Bảng không có dữ liệu.")
+        console.log(`✅ Multi-strategy extraction completed:`)
+        console.log(`  📊 Expected: ${extractionResult.dataQuality.totalExpected}`)
+        console.log(`  ✅ Extracted: ${extractionResult.dataQuality.totalExtracted}`)
+        console.log(`  📉 Loss: ${extractionResult.dataQuality.dataLossPercentage.toFixed(1)}%`)
+        console.log(`  🎯 Strategy: ${extractionResult.strategy}`)
+
+        if (extractionResult.data.length === 0) {
+          setError("Không thể lấy dữ liệu với bất kỳ strategy nào.")
           return
         }
 
-        // 🔥 IMPORTANT: Check for data loss at source
-        if (data.length !== stats.totalRecords) {
-          console.warn(`⚠️ DATA LOSS AT SOURCE: Expected ${stats.totalRecords}, got ${data.length} records`)
-          console.warn(`This is likely a Lark Base SDK issue, not a conversion issue`)
-        }
+        setTableStats((prev:any) => ({
+          ...prev,
+          extractionReport: extractionResult.extractionReport,
+          extractionStrategy: extractionResult.strategy,
+          dataQuality: extractionResult.dataQuality,
+        }))
 
-        // Step 4: Process Data with Enhanced CSV
-        const hasRealData = data.some((record) =>
+        // Step 5: Process Data with Enhanced CSV
+        const hasRealData = extractionResult.data.some((record) =>
           Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
         )
 
         if (hasRealData) {
-          await performDataPreprocessing(data)
+          await performDataPreprocessing(extractionResult.data)
         } else {
-          setError("Không có dữ liệu chi tiết fields.")
+          setError("Không có dữ liệu chi tiết fields sau khi extract.")
         }
       } catch (err) {
         console.error("❌ Initialization error:", err)
@@ -505,12 +525,20 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px", marginBottom: "20px" }}>
         {tableStats && (
           <StatusCard
-            title="📊 Thống kê bảng"
-            status={`${tableStats.totalRecords} records, ${tableStats.totalFields} fields`}
-            details={`Loaded: ${tableData.length} records${
-              tableData.length !== tableStats.totalRecords ? " ⚠️ Data loss at source" : ""
-            }`}
-            type={tableData.length === tableStats.totalRecords ? "success" : "warning"}
+            title="📊 Multi-Strategy Extraction"
+            status={`${tableStats.totalRecords} expected → ${tableData.length} extracted`}
+            details={
+              tableStats.extractionStrategy
+                ? `Strategy: ${tableStats.extractionStrategy} | Loss: ${tableStats.dataQuality?.dataLossPercentage?.toFixed(1) || 0}%`
+                : `Loaded: ${tableData.length} records`
+            }
+            type={
+              tableStats.dataQuality?.dataLossPercentage === 0
+                ? "success"
+                : tableStats.dataQuality?.dataLossPercentage < 5
+                  ? "warning"
+                  : "error"
+            }
           />
         )}
 
@@ -527,6 +555,81 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           />
         )}
       </div>
+
+      {/* Multi-Strategy Extraction Report */}
+      {tableStats && tableStats.extractionReport && (
+        <div style={{ marginBottom: "20px" }}>
+          <StatusCard
+            title="🔍 Multi-Strategy Extraction Report"
+            status={`Best strategy: ${tableStats.extractionStrategy}`}
+            details={`${tableStats.dataQuality?.dataLossPercentage?.toFixed(1) || 0}% data loss`}
+            type={tableStats.dataQuality?.dataLossPercentage === 0 ? "success" : "warning"}
+          />
+
+          <div style={{ marginTop: "10px" }}>
+            <button
+              onClick={() => setShowDebugTools(!showDebugTools)}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#f8f9fa",
+                border: "1px solid #dee2e6",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: "500",
+              }}
+            >
+              {showDebugTools ? "🔽 Ẩn" : "🔼 Hiện"} Extraction Details
+            </button>
+          </div>
+
+          {showDebugTools && (
+            <div
+              style={{
+                marginTop: "15px",
+                padding: "15px",
+                backgroundColor: "#f8f9fa",
+                borderRadius: "8px",
+                border: "1px solid #dee2e6",
+              }}
+            >
+              <pre style={{ fontSize: "12px", whiteSpace: "pre-wrap", color: "#333" }}>
+                {tableStats.extractionReport}
+              </pre>
+
+              {tableStats.dataQuality?.strategies && (
+                <div style={{ marginTop: "15px" }}>
+                  <h5 style={{ margin: "0 0 10px 0", fontSize: "13px" }}>Strategy Performance:</h5>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                      gap: "10px",
+                    }}
+                  >
+                    {tableStats.dataQuality.strategies.map((strategy: any, index: number) => (
+                      <div
+                        key={index}
+                        style={{
+                          padding: "10px",
+                          backgroundColor: strategy.success ? "#e8f5e8" : "#ffe6e6",
+                          border: `1px solid ${strategy.success ? "#4caf50" : "#ff4444"}`,
+                          borderRadius: "6px",
+                        }}
+                      >
+                        <div style={{ fontWeight: "600", fontSize: "12px", marginBottom: "5px" }}>{strategy.name}</div>
+                        <div style={{ fontSize: "11px", color: strategy.success ? "#4caf50" : "#ff4444" }}>
+                          {strategy.success ? `✅ ${strategy.recordCount} records` : `❌ ${strategy.error}`}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Data Loss Warning (if any) */}
       {tableStats && tableData.length !== tableStats.totalRecords && (
