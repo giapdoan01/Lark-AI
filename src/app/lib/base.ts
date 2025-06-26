@@ -1,5 +1,5 @@
 import { base } from "@lark-base-open/js-sdk"
-import {testSingleRecord, getSimpleTableData, debugSDKMethods} from "../lib/baseRecovery"
+import { getAllRecordsProper, testProperExtraction } from "../lib/baseRecovery"
 
 // Interface cho record data
 interface RecordData {
@@ -136,80 +136,90 @@ export const testTableAccess = async (tableId: string): Promise<boolean> => {
   }
 }
 
-// 🔥 SIMPLE STRATEGY: Sử dụng cách đơn giản nhất
-const simpleExtractionStrategy = async (tableId: string): Promise<RecordData[]> => {
-  console.log(`🔥 SIMPLE EXTRACTION STRATEGY`)
-  console.log(`🎯 Goal: Get actual data using the simplest possible method`)
-
+// Function test với sample data - PROPER METHOD
+export const testTableDataSample = async (tableId: string, sampleSize = 5): Promise<RecordData[]> => {
   try {
-    // Sử dụng simple extraction
-    const simpleData = await getSimpleTableData(tableId)
+    console.log(`🧪 PROPER: Testing with sample data from table: ${tableId}`)
 
-    // Convert sang format chuẩn
-    const standardData: RecordData[] = simpleData.map((record) => ({
+    // Use proper extraction method
+    const testResult = await testProperExtraction(tableId)
+    console.log(`🔍 Proper extraction test result:`, testResult)
+
+    if (testResult.error) {
+      throw new Error(testResult.error)
+    }
+
+    // If test successful, get sample data
+    const allRecords = await getAllRecordsProper(tableId)
+    const sampleData = allRecords.slice(0, sampleSize)
+
+    return sampleData.map((record) => ({
       recordId: record.recordId,
       fields: record.fields,
-      strategy: "simple-extraction",
+      strategy: "proper-extraction",
+      fieldCount: Object.keys(record.fields).length,
+      debugInfo: {
+        hasRealData: Object.values(record.fields).some((v) => v !== null && v !== undefined && v !== ""),
+      },
+    }))
+  } catch (error) {
+    console.error("❌ Proper sample test failed:", error)
+    throw new Error(`Proper sample test thất bại: ${error}`)
+  }
+}
+
+// Function debug table structure - PROPER METHOD
+export const debugTableStructure = async (tableId: string): Promise<void> => {
+  try {
+    console.log(`🔍 PROPER DEBUG: ${tableId}`)
+
+    const testResult = await testProperExtraction(tableId)
+    console.log(`🔍 Proper Extraction Test Result:`, testResult)
+
+    if (testResult.success) {
+      console.log(`✅ Proper extraction working!`)
+      console.log(`📊 Fields with data: ${testResult.fieldsWithData}/${testResult.extractedFields}`)
+    } else {
+      console.log(`❌ Proper extraction failed:`, testResult.error)
+    }
+  } catch (error) {
+    console.error("❌ Proper debug failed:", error)
+  }
+}
+
+// 🔥 MAIN: Proper extraction strategy
+const properExtractionStrategy = async (tableId: string): Promise<RecordData[]> => {
+  console.log(`🔥 PROPER EXTRACTION STRATEGY`)
+  console.log(`🎯 Goal: Get actual data using proper Lark Base SDK methods`)
+
+  try {
+    // Use the proper extraction method
+    const properData = await getAllRecordsProper(tableId)
+
+    // Convert to standard format
+    const standardData: RecordData[] = properData.map((record) => ({
+      recordId: record.recordId,
+      fields: record.fields,
+      strategy: "proper-extraction",
       fieldCount: Object.keys(record.fields).length,
       emptyFields: Object.entries(record.fields)
         .filter(([_, value]) => value === null || value === undefined || value === "")
         .map(([key, _]) => key),
-      debugInfo: record.debugInfo,
+      debugInfo: {
+        hasRealData: Object.values(record.fields).some((v) => v !== null && v !== undefined && v !== ""),
+        createdTime: record.createdTime,
+        lastModifiedTime: record.lastModifiedTime,
+      },
     }))
 
     return standardData
   } catch (error) {
-    console.error(`❌ Simple extraction strategy failed:`, error)
+    console.error(`❌ Proper extraction strategy failed:`, error)
     throw error
   }
 }
 
-// Function test với sample data - SIMPLIFIED
-export const testTableDataSample = async (tableId: string, sampleSize = 5): Promise<RecordData[]> => {
-  try {
-    console.log(`🧪 SIMPLE: Testing with ${sampleSize} sample records from table: ${tableId}`)
-
-    // Sử dụng simple test
-    const testResult = await testSingleRecord(tableId)
-    console.log(`🔍 Single record test result:`, testResult)
-
-    // Nếu test thành công, lấy sample data
-    if (!testResult.error) {
-      const simpleData = await getSimpleTableData(tableId)
-      const sampleData = simpleData.slice(0, sampleSize)
-
-      return sampleData.map((record) => ({
-        recordId: record.recordId,
-        fields: record.fields,
-        strategy: "simple-sample",
-        fieldCount: Object.keys(record.fields).length,
-        debugInfo: record.debugInfo,
-      }))
-    } else {
-      throw new Error(testResult.error)
-    }
-  } catch (error) {
-    console.error("❌ Simple sample test failed:", error)
-    throw new Error(`Simple sample test thất bại: ${error}`)
-  }
-}
-
-// Function debug table structure - SIMPLIFIED
-export const debugTableStructure = async (tableId: string): Promise<void> => {
-  try {
-    console.log(`🔍 SIMPLE DEBUG: ${tableId}`)
-
-    const debugResult = await debugSDKMethods(tableId)
-    console.log(`🔍 SDK Debug Result:`, debugResult)
-
-    const testResult = await testSingleRecord(tableId)
-    console.log(`🔍 Single Record Test:`, testResult)
-  } catch (error) {
-    console.error("❌ Simple debug failed:", error)
-  }
-}
-
-// 🔥 MAIN: Simple multi-strategy extraction
+// 🔥 MAIN: Multi-strategy extraction with proper method first
 export const getTableDataWithMultipleStrategies = async (
   tableId: string,
 ): Promise<{
@@ -230,7 +240,7 @@ export const getTableDataWithMultipleStrategies = async (
     }>
   }
 }> => {
-  console.log(`🔥 ===== SIMPLE MULTI-STRATEGY EXTRACTION =====`)
+  console.log(`🔥 ===== PROPER MULTI-STRATEGY EXTRACTION =====`)
   console.log(`📊 Table ID: ${tableId}`)
 
   try {
@@ -245,12 +255,12 @@ export const getTableDataWithMultipleStrategies = async (
     console.log(`📊 Expected records: ${expectedRecordCount}`)
     console.log(`📋 Expected fields per record: ${expectedFieldCount}`)
 
-    // Chỉ dùng simple strategy
+    // Only use proper strategy now
     const strategies = [
       {
-        name: "Simple Extraction",
-        description: "Basic getRecordById with getCellValue fallback",
-        extract: simpleExtractionStrategy,
+        name: "Proper Lark Base Extraction",
+        description: "Research-based proper SDK usage with error handling and rate limiting",
+        extract: properExtractionStrategy,
       },
     ]
 
@@ -272,7 +282,7 @@ export const getTableDataWithMultipleStrategies = async (
         const extractionTime = Date.now() - startTime
 
         const recordCount = strategyData.length
-        const dataQuality = calculateSimpleDataQuality(strategyData, expectedFieldCount)
+        const dataQuality = calculateProperDataQuality(strategyData, expectedFieldCount)
 
         console.log(`✅ ${strategy.name} completed:`)
         console.log(`  📊 Records: ${recordCount}/${expectedRecordCount}`)
@@ -302,14 +312,14 @@ export const getTableDataWithMultipleStrategies = async (
     }
 
     if (!bestResult) {
-      throw new Error("Simple extraction failed")
+      throw new Error("Proper extraction failed")
     }
 
     const dataLossPercentage = ((expectedRecordCount - bestResult.data.length) / expectedRecordCount) * 100
-    const finalDataQuality = calculateSimpleDataQuality(bestResult.data, expectedFieldCount)
+    const finalDataQuality = calculateProperDataQuality(bestResult.data, expectedFieldCount)
 
     const extractionReport = `
-🔥 SIMPLE EXTRACTION REPORT:
+🔥 PROPER EXTRACTION REPORT:
   📊 Expected records: ${expectedRecordCount}
   ✅ Extracted records: ${bestResult.data.length}
   📉 Record loss: ${dataLossPercentage.toFixed(1)}%
@@ -319,9 +329,9 @@ export const getTableDataWithMultipleStrategies = async (
 
 🎯 RESULT:
 ${
-  finalDataQuality.fieldCompletenessRate > 0
+  finalDataQuality.fieldsWithData > 0
     ? `✅ SUCCESS: Found ${finalDataQuality.fieldsWithData} fields with actual data!`
-    : `❌ FAILED: No actual field data found - this is a fundamental issue`
+    : `❌ FAILED: No actual field data found - check permissions or SDK setup`
 }
 
 ${
@@ -330,15 +340,28 @@ ${
 🚨 DIAGNOSIS:
   - SDK can access table structure (${expectedRecordCount} records, ${expectedFieldCount} fields)
   - But cannot access actual field values
-  - This suggests permission or SDK version issues
-  - Check if app has proper read permissions in Lark Base
+  - Check app permissions in Lark Base
+  - Verify SDK version compatibility
+  - Ensure app is running inside Lark Base environment
 `
-    : ""
+    : finalDataQuality.fieldCompletenessRate > 80
+      ? `
+🎉 EXCELLENT:
+  - High data extraction rate (${finalDataQuality.fieldCompletenessRate.toFixed(1)}%)
+  - Proper SDK methods working correctly
+  - Ready for data analysis
+`
+      : `
+⚠️ PARTIAL SUCCESS:
+  - Some data extracted (${finalDataQuality.fieldCompletenessRate.toFixed(1)}%)
+  - May have permission limitations on certain fields
+  - Check field-level permissions
+`
 }
     `
 
     console.log(extractionReport)
-    console.log(`===== END SIMPLE EXTRACTION =====\n`)
+    console.log(`===== END PROPER EXTRACTION =====\n`)
 
     return {
       data: bestResult.data,
@@ -353,13 +376,13 @@ ${
       },
     }
   } catch (error) {
-    console.error(`❌ Simple multi-strategy extraction failed:`, error)
-    throw new Error(`Simple extraction failed: ${error}`)
+    console.error(`❌ Proper multi-strategy extraction failed:`, error)
+    throw new Error(`Proper extraction failed: ${error}`)
   }
 }
 
-// Helper function tính data quality đơn giản
-const calculateSimpleDataQuality = (
+// Helper function tính data quality
+const calculateProperDataQuality = (
   data: RecordData[],
   expectedFieldCount: number,
 ): { qualityScore: number; fieldCompletenessRate: number; fieldsWithData: number; stats: any } => {
@@ -395,7 +418,7 @@ const calculateSimpleDataQuality = (
 
 // Function chính lấy TẤT CẢ dữ liệu từ bảng
 export const getTableData = async (tableId: string): Promise<RecordData[]> => {
-  console.log(`📥 getTableData called - using simple extraction`)
+  console.log(`📥 getTableData called - using proper extraction`)
   const result = await getTableDataWithMultipleStrategies(tableId)
   return result.data
 }
@@ -410,7 +433,7 @@ export const getTableDataWithTypes = async (
   fieldMetadata: Array<{ id: string; name: string; type: string }>
 }> => {
   try {
-    console.log(`📥 Getting table data with simple field metadata: ${tableId}`)
+    console.log(`📥 Getting table data with proper field metadata: ${tableId}`)
 
     const table = await base.getTable(tableId)
     if (!table) {
@@ -446,7 +469,7 @@ export const getTableDataWithTypes = async (
       fieldMetadata,
     }
   } catch (error) {
-    console.error("❌ Error getting table data with simple metadata:", error)
+    console.error("❌ Error getting table data with proper metadata:", error)
     throw error
   }
 }
