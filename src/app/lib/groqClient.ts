@@ -8,7 +8,7 @@ const API_KEYS = [
   process.env.NEXT_PUBLIC_GROQ_API_KEY_4 || "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",
 ].filter((key) => key && key.startsWith("gsk_"))
 
-const MODEL = "meta-llama/llama-prompt-guard-2-86m"
+const MODEL = "llama3-70b-8192"
 
 // Cache đơn giản
 const testResultsCache = new Map<string, boolean>()
