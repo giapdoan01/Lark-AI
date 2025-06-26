@@ -2,9 +2,10 @@ import { Groq } from "groq-sdk"
 
 // API Keys
 const API_KEYS = [
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_1 || "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",
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_2 || "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",
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_3 || "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",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_1 || "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",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_2 || "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",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_3 || "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",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_3 || "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",
 ].filter((key) => key && key.startsWith("gsk_"))
 
 const MODEL = "llama-3.1-70b-versatile"
