@@ -16,31 +16,27 @@ export default function TableSelector({
   const [tables, setTables] = useState<TableMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [sdkStatus, setSdkStatus] = useState<string>("")
 
   useEffect(() => {
     const loadTables = async () => {
       try {
         setLoading(true)
 
-        // Kiểm tra SDK trước
+        // Check SDK
         const status = await checkSDKStatus()
-        setSdkStatus(`${status.status}: ${status.message}`)
-
         if (status.status === "error") {
           throw new Error(status.message)
         }
 
-        // Lấy danh sách bảng
+        // Get tables
         const tableList = await base.getTableMetaList()
-        console.log("📋 Danh sách bảng:", tableList)
+        console.log("📋 Found tables:", tableList.length)
 
         setTables(tableList)
         setError(null)
       } catch (err) {
-        console.error("❌ Lỗi khi lấy danh sách bảng:", err)
-        const errorMessage = err instanceof Error ? err.message : String(err)
-        setError(errorMessage)
+        console.error("❌ Error loading tables:", err)
+        setError(err instanceof Error ? err.message : String(err))
       } finally {
         setLoading(false)
       }
@@ -50,42 +46,21 @@ export default function TableSelector({
   }, [])
 
   if (loading) {
-    return (
-      <div>
-        <div>🔄 Đang tải danh sách bảng...</div>
-        {sdkStatus && <div style={{ fontSize: "12px", color: "#666", marginTop: "5px" }}>{sdkStatus}</div>}
-      </div>
-    )
+    return <div>🔄 Loading tables...</div>
   }
 
   if (error) {
     return (
       <div>
         <div style={{ color: "red", marginBottom: "10px" }}>❌ {error}</div>
-        <div style={{ fontSize: "12px", color: "#666", marginBottom: "10px" }}>SDK Status: {sdkStatus}</div>
-        <div style={{ fontSize: "14px", marginBottom: "10px" }}>
-          <strong>Các bước khắc phục:</strong>
-          <ol>
-            <li>Đảm bảo ứng dụng đang chạy trong Lark Base</li>
-            <li>Kiểm tra quyền truy cập bảng</li>
-            <li>Thử refresh trang</li>
-          </ol>
-        </div>
-        <button onClick={() => window.location.reload()}>🔄 Thử lại</button>
+        <button onClick={() => window.location.reload()}>🔄 Retry</button>
       </div>
     )
   }
 
   return (
     <div>
-      <div style={{ marginBottom: "10px" }}>
-        <div style={{ fontSize: "12px", color: "#666" }}>✅ {sdkStatus}</div>
-        <div style={{ fontSize: "12px", color: "#007acc", marginTop: "5px" }}>
-          📊 Dữ liệu sẽ được chuyển đổi sang CSV format để tối ưu tokens
-        </div>
-      </div>
-
-      <label htmlFor="table-select">📊 Chọn bảng dữ liệu:</label>
+      <label htmlFor="table-select">📊 Select table:</label>
       <select
         id="table-select"
         onChange={(e) => {
@@ -97,10 +72,10 @@ export default function TableSelector({
         }}
         style={{ marginLeft: "10px", padding: "5px" }}
       >
-        <option value="">-- Chọn bảng ({tables.length} bảng có sẵn) --</option>
+        <option value="">-- Select table ({tables.length} available) --</option>
         {tables.map((t) => (
           <option key={t.id} value={t.id}>
-            {t.name} (CSV optimized)
+            {t.name}
           </option>
         ))}
       </select>

@@ -1,15 +1,13 @@
 import { Groq } from "groq-sdk"
 
-// Danh sách API keys
+// API Keys
 const API_KEYS = [
   process.env.NEXT_PUBLIC_GROQ_API_KEY_1 || "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",
   process.env.NEXT_PUBLIC_GROQ_API_KEY_2 || "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",
   process.env.NEXT_PUBLIC_GROQ_API_KEY_3 || "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",
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_4 || "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",
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_5 || "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",
-].filter((key) => key && !key.includes("account") && key.startsWith("gsk_"))
+].filter((key) => key && key.startsWith("gsk_"))
 
-const SINGLE_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+const MODEL = "llama-3.1-70b-versatile"
 
 // Cache đơn giản
 const testResultsCache = new Map<string, boolean>()
@@ -17,6 +15,93 @@ const testResultsCache = new Map<string, boolean>()
 // Function ước tính số tokens
 const estimateTokens = (text: string): number => {
   return Math.ceil(text.length / 4)
+}
+
+// 🔥 SIMPLE: Convert data to CSV
+const convertToCSV = (data: Array<{ recordId: string; fields: Record<string, any> }>): string => {
+  if (data.length === 0) return ""
+
+  console.log(`📊 Converting ${data.length} records to CSV...`)
+
+  // Get all field names
+  const allFields = new Set<string>()
+  data.forEach((record) => {
+    Object.keys(record.fields).forEach((field) => allFields.add(field))
+  })
+
+  const fieldNames = Array.from(allFields)
+  console.log(`📋 Found ${fieldNames.length} unique fields`)
+
+  // Create CSV header
+  const headers = ["RecordID", ...fieldNames].map((h) => `"${h}"`).join(",")
+
+  // Create CSV rows
+  const rows = data.map((record) => {
+    const values = [record.recordId]
+
+    fieldNames.forEach((fieldName) => {
+      const value = record.fields[fieldName]
+      let csvValue = ""
+
+      if (value !== null && value !== undefined) {
+        if (typeof value === "string") {
+          csvValue = value
+        } else if (typeof value === "number" || typeof value === "boolean") {
+          csvValue = String(value)
+        } else if (typeof value === "object") {
+          // Extract text from objects
+          try {
+            const jsonStr = JSON.stringify(value)
+            const textMatch = jsonStr.match(/"text":"([^"]*)"/)
+            csvValue = textMatch ? textMatch[1] : JSON.stringify(value)
+          } catch {
+            csvValue = String(value)
+          }
+        } else {
+          csvValue = String(value)
+        }
+      }
+
+      // Escape CSV value
+      csvValue = csvValue.replace(/"/g, '""')
+      values.push(`"${csvValue}"`)
+    })
+
+    return values.join(",")
+  })
+
+  const csvContent = [headers, ...rows].join("\n")
+  console.log(`✅ CSV created: ${csvContent.length} characters`)
+
+  return csvContent
+}
+
+// 🔥 SIMPLE: Get working API
+const getWorkingAPI = async (): Promise<Groq | null> => {
+  for (let i = 0; i < API_KEYS.length; i++) {
+    try {
+      const groq = new Groq({
+        apiKey: API_KEYS[i],
+        dangerouslyAllowBrowser: true,
+      })
+
+      // Test API
+      const test = await groq.chat.completions.create({
+        model: MODEL,
+        messages: [{ role: "user", content: "Test" }],
+        max_tokens: 5,
+      })
+
+      if (test?.choices?.[0]?.message?.content) {
+        console.log(`✅ API ${i + 1} working`)
+        return groq
+      }
+    } catch (error) {
+      console.log(`❌ API ${i + 1} failed:`, error)
+    }
+  }
+
+  return null
 }
 
 // 🔥 SIMPLIFIED: Clean field extraction - chỉ lấy giá trị thực
@@ -391,7 +476,7 @@ const selectRandomWorkingAPI = async (): Promise<{ apiKey: string; apiIndex: num
 
 // Test single API key với Llama 4 Scout
 const testSingleAPI = async (keyIndex: number): Promise<{ success: boolean; details: any }> => {
-  const cacheKey = `test_${keyIndex}_${SINGLE_MODEL}`
+  const cacheKey = `test_${keyIndex}_${MODEL}`
 
   if (testResultsCache.has(cacheKey)) {
     console.log(`🔄 Using cached test result for API ${keyIndex + 1}`)
@@ -403,13 +488,16 @@ const testSingleAPI = async (keyIndex: number): Promise<{ success: boolean; deta
 
   try {
     const apiKey = API_KEYS[keyIndex]
-    console.log(`🧪 Testing API ${keyIndex + 1} with ${SINGLE_MODEL}`)
+    console.log(`🧪 Testing API ${keyIndex + 1} with ${MODEL}`)
 
-    const groq = createGroqClient(apiKey)
+    const groq = new Groq({
+      apiKey: apiKey,
+      dangerouslyAllowBrowser: true,
+    })
     const startTime = Date.now()
 
     const testCompletion = await groq.chat.completions.create({
-      model: SINGLE_MODEL,
+      model: MODEL,
       messages: [
         {
           role: "user",
@@ -433,12 +521,12 @@ const testSingleAPI = async (keyIndex: number): Promise<{ success: boolean; deta
       response: response,
       responseTime: responseTime,
       preview: `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`,
-      model: SINGLE_MODEL,
+      model: MODEL,
       error: success ? null : "No response content",
     }
 
     console.log(
-      `${success ? "✅" : "❌"} API ${keyIndex + 1} ${SINGLE_MODEL}: ${success ? "OK" : "FAILED"} (${responseTime}ms)`,
+      `${success ? "✅" : "❌"} API ${keyIndex + 1} ${MODEL}: ${success ? "OK" : "FAILED"} (${responseTime}ms)`,
     )
     if (success) {
       console.log(`🔍 Response: "${response}"`)
@@ -447,7 +535,7 @@ const testSingleAPI = async (keyIndex: number): Promise<{ success: boolean; deta
     return { success, details }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error)
-    console.log(`❌ API ${keyIndex + 1} ${SINGLE_MODEL} failed: ${errorMsg}`)
+    console.log(`❌ API ${keyIndex + 1} ${MODEL} failed: ${errorMsg}`)
 
     testResultsCache.set(cacheKey, false)
 
@@ -456,20 +544,13 @@ const testSingleAPI = async (keyIndex: number): Promise<{ success: boolean; deta
       status: "failed",
       error: errorMsg,
       preview: `${API_KEYS[keyIndex].substring(0, 10)}...${API_KEYS[keyIndex].substring(API_KEYS[keyIndex].length - 4)}`,
-      model: SINGLE_MODEL,
+      model: MODEL,
       response: null,
       responseTime: 0,
     }
 
     return { success: false, details }
   }
-}
-
-const createGroqClient = (apiKey: string): Groq => {
-  return new Groq({
-    apiKey: apiKey,
-    dangerouslyAllowBrowser: true,
-  })
 }
 
 // 🔥 NEW: Enhanced CSV analysis với Llama 4 Scout
@@ -480,7 +561,7 @@ const analyzeEnhancedCSVWithRandomAPI = async (
   conversionReport: string,
 ): Promise<{ success: boolean; analysis: string; apiDetails: any; error?: string }> => {
   try {
-    console.log(`\n🚀 ===== ENHANCED CSV ANALYSIS với ${SINGLE_MODEL} =====`)
+    console.log(`\n🚀 ===== ENHANCED CSV ANALYSIS với ${MODEL} =====`)
     console.log(`📊 INPUT: ${recordCount} records`)
     console.log(`📄 CSV size: ${csvContent.length} characters`)
     console.log(`🎯 Estimated tokens: ${estimateTokens(csvContent)}`)
@@ -498,7 +579,10 @@ const analyzeEnhancedCSVWithRandomAPI = async (
 
     console.log(`🎯 Using API ${selectedAPI.apiIndex + 1} for enhanced CSV analysis`)
 
-    const groq = createGroqClient(selectedAPI.apiKey)
+    const groq = new Groq({
+      apiKey: selectedAPI.apiKey,
+      dangerouslyAllowBrowser: true,
+    })
 
     // 🔥 NEW: Enhanced CSV analysis prompt với zero data loss focus + field order verification
     const analysisPrompt = `Phân tích toàn bộ dữ liệu CSV từ bảng "${tableName}" (${recordCount} records) với ZERO DATA LOSS guarantee và CORRECT FIELD ORDER:
@@ -561,7 +645,7 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng và focus v�
     const startTime = Date.now()
 
     const completion = await groq.chat.completions.create({
-      model: SINGLE_MODEL,
+      model: MODEL,
       messages: [{ role: "user", content: analysisPrompt }],
       temperature: 0.7,
       max_tokens: 4000,
@@ -575,7 +659,7 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng và focus v�
       console.log(`❌ ${errorMsg}`)
       return {
         success: false,
-        analysis: `❌ Không nhận được phản hồi từ ${SINGLE_MODEL}`,
+        analysis: `❌ Không nhận được phản hồi từ ${MODEL}`,
         apiDetails: selectedAPI.details,
         error: errorMsg,
       }
@@ -607,7 +691,7 @@ Trả lời chi tiết bằng tiếng Việt với format rõ ràng và focus v�
 
     return {
       success: false,
-      analysis: `❌ Lỗi phân tích với ${SINGLE_MODEL}: ${errorMsg}`,
+      analysis: `❌ Lỗi phân tích với ${MODEL}: ${errorMsg}`,
       apiDetails: { error: errorMsg },
       error: errorMsg,
     }
@@ -622,7 +706,7 @@ export const preprocessDataWithPipeline = async (
 ): Promise<{ success: boolean; optimizedData: string; analysis: string; keyUsage: any }> => {
   try {
     console.log(
-      `🚀 Enhanced CSV Pipeline (ZERO DATA LOSS + FIELD ORDER FIX) với ${data.length} records - Model: ${SINGLE_MODEL}`,
+      `🚀 Enhanced CSV Pipeline (ZERO DATA LOSS + FIELD ORDER FIX) với ${data.length} records - Model: ${MODEL}`,
     )
 
     if (!API_KEYS || API_KEYS.length === 0) {
@@ -674,7 +758,7 @@ export const preprocessDataWithPipeline = async (
           error: true,
           format: "Enhanced CSV (Field Order Fixed)",
           fallback: true,
-          model: SINGLE_MODEL,
+          model: MODEL,
           strategy: "Enhanced CSV (Zero Data Loss + Field Order Fix)",
           errorDetails: analysisResult.error,
           dataIntegrity: integrityValidation,
@@ -692,7 +776,7 @@ export const preprocessDataWithPipeline = async (
       processedRecords: data.length,
       dataLoss: Math.max(0, 100 - stats.dataPreservationRate),
       format: "Enhanced CSV (Zero Data Loss + Field Order Fixed)",
-      model: SINGLE_MODEL,
+      model: MODEL,
       strategy: "Enhanced CSV Direct Analysis + Field Order Preservation",
       responseTime: analysisResult.apiDetails.responseTime,
       inputTokens: analysisResult.apiDetails.inputTokens,
@@ -731,11 +815,11 @@ export const preprocessDataWithPipeline = async (
     return {
       success: true,
       optimizedData: csvContent,
-      analysis: `❌ Pipeline error với ${SINGLE_MODEL}: ${error}. Sử dụng enhanced CSV với ${data.length} records.`,
+      analysis: `❌ Pipeline error với ${MODEL}: ${error}. Sử dụng enhanced CSV với ${data.length} records.`,
       keyUsage: {
         error: true,
         format: "Enhanced CSV (Field Order Fixed)",
-        model: SINGLE_MODEL,
+        model: MODEL,
         fallback: true,
         strategy: "Enhanced CSV (Zero Data Loss + Field Order Fix)",
         dataIntegrity: { isValid: false, report: "Pipeline failed", issues: [String(error)] },
@@ -744,202 +828,163 @@ export const preprocessDataWithPipeline = async (
   }
 }
 
-// 🔥 UPDATED: Answer question với enhanced CSV + field order awareness
-export const answerQuestionWithOptimizedData = async (
-  optimizedCSVData: string,
+// 🔥 SIMPLE: Analyze data with AI
+export const analyzeDataSimple = async (
+  data: Array<{ recordId: string; fields: Record<string, any> }>,
   tableName: string,
-  question: string,
-  originalRecordCount: number,
-): Promise<string> => {
+): Promise<{ success: boolean; analysis: string }> => {
   try {
-    console.log(`🤔 Trả lời câu hỏi với enhanced CSV data (${originalRecordCount} records) - ${SINGLE_MODEL}`)
+    console.log(`🤖 Analyzing ${data.length} records from "${tableName}"`)
 
-    const selectedAPI = await selectRandomWorkingAPI()
-
-    if (!selectedAPI) {
-      return `❌ Không có API nào hoạt động với ${SINGLE_MODEL}`
+    if (data.length === 0) {
+      return {
+        success: false,
+        analysis: "❌ No data to analyze",
+      }
     }
 
-    console.log(`🎯 Using API ${selectedAPI.apiIndex + 1} for question answering`)
+    // Convert to CSV
+    const csvData = convertToCSV(data)
 
-    // Keep more CSV data for questions
-    const maxCSVLength = 10000 // Increased for enhanced CSV
-    const truncatedCSV =
-      optimizedCSVData.length > maxCSVLength ? optimizedCSVData.substring(0, maxCSVLength) + "..." : optimizedCSVData
+    if (!csvData) {
+      return {
+        success: false,
+        analysis: "❌ Cannot convert data to CSV",
+      }
+    }
 
-    const questionPrompt = `Dữ liệu Enhanced CSV từ bảng "${tableName}" (${originalRecordCount} records) với ZERO DATA LOSS + CORRECT FIELD ORDER:
+    // Get working API
+    const groq = await getWorkingAPI()
 
-${truncatedCSV}
+    if (!groq) {
+      return {
+        success: false,
+        analysis: "❌ No working API keys",
+      }
+    }
 
-Câu hỏi: ${question}
+    // Analyze with AI
+    const prompt = `Phân tích dữ liệu CSV từ bảng "${tableName}":
 
-Phân tích dữ liệu CSV và trả lời chi tiết bằng tiếng Việt:
+${csvData}
 
-1. **Trả lời trực tiếp câu hỏi** dựa trên complete CSV data với correct field order
-2. **Dẫn chứng cụ thể** từ CSV rows và columns (verify field order accuracy)
-3. **Đếm chính xác** từ CSV data (verify với ${originalRecordCount} records)
-4. **Field order verification** - đảm bảo không nhầm lẫn giữa các trường
-5. **Insights bổ sung** từ complete dataset
-6. **Data quality notes** nếu cần
+Hãy phân tích và trả lời bằng tiếng Việt:
+1. Tổng quan về dữ liệu (số records, fields)
+2. Thống kê chính
+3. Insights quan trọng
+4. Kết luận
 
-**QUAN TRỌNG - ZERO DATA LOSS + FIELD ORDER ACCURACY**: 
-- Chỉ dựa vào dữ liệu thực tế trong CSV
-- Đếm chính xác từ CSV rows
-- Sử dụng complete data đã được preserve
-- Verify field order không bị đảo lộn
-- Không đoán mò hoặc tạo ra thông tin không có
-
-Trả lời:`
-
-    const groq = createGroqClient(selectedAPI.apiKey)
-    const startTime = Date.now()
+Trả lời chi tiết và dễ hiểu:`
 
     const completion = await groq.chat.completions.create({
-      model: SINGLE_MODEL,
-      messages: [{ role: "user", content: questionPrompt }],
+      model: MODEL,
+      messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
       max_tokens: 2000,
     })
 
-    const responseTime = Date.now() - startTime
+    const analysis = completion?.choices?.[0]?.message?.content
 
-    if (!completion?.choices?.[0]?.message?.content) {
-      throw new Error("No response content")
+    if (!analysis) {
+      return {
+        success: false,
+        analysis: "❌ No response from AI",
+      }
     }
 
-    const answer = completion.choices[0].message.content
-    console.log(`✅ Question answered with enhanced CSV data + field order verification (${responseTime}ms)`)
+    console.log(`✅ Analysis completed`)
 
+    return {
+      success: true,
+      analysis: analysis,
+    }
+  } catch (error) {
+    console.error(`❌ Analysis failed:`, error)
+    return {
+      success: false,
+      analysis: `❌ Analysis error: ${error}`,
+    }
+  }
+}
+
+// 🔥 SIMPLE: Answer questions
+export const answerQuestion = async (
+  data: Array<{ recordId: string; fields: Record<string, any> }>,
+  tableName: string,
+  question: string,
+): Promise<string> => {
+  try {
+    console.log(`🤔 Answering question about "${tableName}": ${question}`)
+
+    if (data.length === 0) {
+      return "❌ Không có dữ liệu để trả lời câu hỏi"
+    }
+
+    // Convert to CSV (limited for questions)
+    const limitedData = data.slice(0, 50) // Only use first 50 records for questions
+    const csvData = convertToCSV(limitedData)
+
+    // Get working API
+    const groq = await getWorkingAPI()
+
+    if (!groq) {
+      return "❌ Không có API key nào hoạt động"
+    }
+
+    const prompt = `Dữ liệu CSV từ bảng "${tableName}":
+
+${csvData}
+
+Câu hỏi: ${question}
+
+Hãy trả lời câu hỏi dựa trên dữ liệu CSV trên. Trả lời bằng tiếng Việt, chi tiết và chính xác:`
+
+    const completion = await groq.chat.completions.create({
+      model: MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+      max_tokens: 1500,
+    })
+
+    const answer = completion?.choices?.[0]?.message?.content
+
+    if (!answer) {
+      return "❌ Không nhận được phản hồi từ AI"
+    }
+
+    console.log(`✅ Question answered`)
     return answer
   } catch (error) {
-    console.error("❌ answerQuestionWithOptimizedData failed:", error)
-    return `❌ Lỗi khi trả lời câu hỏi với ${SINGLE_MODEL}: ${error}`
+    console.error(`❌ Question answering failed:`, error)
+    return `❌ Lỗi khi trả lời câu hỏi: ${error}`
+  }
+}
+
+// Test API function
+export const testAPI = async () => {
+  const groq = await getWorkingAPI()
+  return {
+    success: !!groq,
+    message: groq ? "API working" : "No working APIs",
+    model: MODEL,
   }
 }
 
 // Export functions
 export const analyzeDataWithParallelKeys = preprocessDataWithPipeline
 
-export const answerQuestionWithData = async (
-  data: any[],
-  tableName: string,
-  question: string,
-  previousAnalysis?: string,
-  optimizedData?: string,
-): Promise<string> => {
-  try {
-    if (optimizedData && optimizedData.length > 0) {
-      return await answerQuestionWithOptimizedData(optimizedData, tableName, question, data.length)
-    } else {
-      // Use enhanced CSV for quick questions too
-      const { csvContent } = convertToEnhancedCSV(data.slice(0, 30))
-      return await answerQuestionWithOptimizedData(csvContent, tableName, question, data.length)
-    }
-  } catch (error) {
-    console.error("❌ answerQuestionWithData failed:", error)
-    return `❌ Lỗi khi trả lời câu hỏi: ${error}`
-  }
-}
-
-export const testAllApiKeys = async (): Promise<{
-  success: boolean
-  message: string
-  workingKeys: number
-  totalKeys: number
-  keyDetails: any[]
-}> => {
-  console.log(`🧪 Testing ${API_KEYS.length} API keys với ${SINGLE_MODEL}...`)
-
-  const testPromises = API_KEYS.map(async (apiKey, index) => {
-    try {
-      const groq = createGroqClient(apiKey)
-      const startTime = Date.now()
-
-      const testCompletion = await groq.chat.completions.create({
-        model: SINGLE_MODEL,
-        messages: [
-          {
-            role: "user",
-            content: "Test: Return 'OK'",
-          },
-        ],
-        temperature: 0.1,
-        max_tokens: 10,
-      })
-
-      const responseTime = Date.now() - startTime
-      const response = testCompletion?.choices?.[0]?.message?.content || "No response"
-      console.log(`✅ API ${index + 1}: OK (${responseTime}ms)`)
-
-      return {
-        keyIndex: index + 1,
-        status: "success" as const,
-        response: response,
-        responseTime: responseTime,
-        preview: `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`,
-        model: SINGLE_MODEL,
-      }
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error)
-      console.log(`❌ API ${index + 1}: ${errorMsg}`)
-      return {
-        keyIndex: index + 1,
-        status: "failed" as const,
-        error: errorMsg,
-        preview: `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`,
-        model: SINGLE_MODEL,
-        responseTime: 0,
-      }
-    }
-  })
-
-  const results = await Promise.all(testPromises)
-  const workingKeys = results.filter((r) => r.status === "success").length
-
-  return {
-    success: workingKeys > 0,
-    message: `${workingKeys}/${API_KEYS.length} API keys hoạt động với ${SINGLE_MODEL}`,
-    workingKeys: workingKeys,
-    totalKeys: API_KEYS.length,
-    keyDetails: results,
-  }
-}
-
-// Backward compatibility functions
-export const askAI = async (context: string, question: string): Promise<string> => {
-  return await answerQuestionWithData([], "Unknown", question)
-}
-
-export const askAIWithFullData = async (data: any[], tableName: string, question: string): Promise<string> => {
-  return await answerQuestionWithData(data, tableName, question)
-}
-
-export const askAIWithRawData = async (data: any[], tableName: string, question: string): Promise<string> => {
-  return await answerQuestionWithData(data, tableName, question)
-}
-
-export const testGroqAPI = async () => {
-  const result = await testAllApiKeys()
-  return {
-    success: result.success,
-    message: result.message,
-    workingModel: SINGLE_MODEL,
-    format: "Enhanced CSV (Zero Data Loss + Field Order Fixed)",
-  }
-}
-
 export const getAvailableModels = (): string[] => {
-  return [SINGLE_MODEL]
+  return [MODEL]
 }
 
 export const getApiKeysInfo = () => {
   return {
     totalKeys: API_KEYS.length,
     keysPreview: API_KEYS.map(
-      (key, index) => `API ${index + 1}: ${key.substring(0, 10)}...${key.substring(key.length - 4)} (${SINGLE_MODEL})`,
+      (key, index) => `API ${index + 1}: ${key.substring(0, 10)}...${key.substring(key.length - 4)} (${MODEL})`,
     ),
     format: "Enhanced CSV (Zero Data Loss + Field Order Fixed)",
-    model: SINGLE_MODEL,
+    model: MODEL,
   }
 }
 

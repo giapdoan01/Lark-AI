@@ -1,776 +1,152 @@
 "use client"
-import { useEffect, useState, useRef } from "react"
-import {
-  getTableStats,
-  getTableDataWithTypes,
-  testTableDataSample,
-  checkSDKStatus,
-  debugTableStructure,
-  testTableAccess,
-} from "../lib/base"
-import { preprocessDataWithPipeline, answerQuestionWithData, testAllApiKeys } from "../lib/groqClient"
+import { useEffect, useState } from "react"
+import { getTableStats, getTableData } from "../lib/base"
+import { analyzeDataSimple, answerQuestion, testAPI } from "../lib/groqClient"
 
 interface ChatBotProps {
   tableId: string
   tableName: string
 }
 
-// 🎨 Progress Steps Component
-const ProgressSteps = ({ currentStep, steps }: { currentStep: number; steps: string[] }) => (
-  <div style={{ margin: "15px 0" }}>
-    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-      {steps.map((step, index) => (
-        <div key={index} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-          <div
-            style={{
-              width: "24px",
-              height: "24px",
-              borderRadius: "50%",
-              backgroundColor: index <= currentStep ? "#007acc" : "#e0e0e0",
-              color: index <= currentStep ? "white" : "#999",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "12px",
-              fontWeight: "bold",
-            }}
-          >
-            {index < currentStep ? "✓" : index + 1}
-          </div>
-          <span style={{ fontSize: "12px", color: index <= currentStep ? "#007acc" : "#999" }}>{step}</span>
-          {index < steps.length - 1 && (
-            <div
-              style={{
-                width: "20px",
-                height: "2px",
-                backgroundColor: index < currentStep ? "#007acc" : "#e0e0e0",
-                margin: "0 5px",
-              }}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  </div>
-)
-
-// 🎨 Status Card Component
-const StatusCard = ({
-  title,
-  status,
-  details,
-  type = "info",
-}: {
-  title: string
-  status: string
-  details?: string
-  type?: "info" | "success" | "warning" | "error"
-}) => {
-  const colors = {
-    info: { bg: "#e8f4fd", border: "#007acc", text: "#007acc" },
-    success: { bg: "#e8f5e8", border: "#4caf50", text: "#4caf50" },
-    warning: { bg: "#fff3cd", border: "#ffc107", text: "#856404" },
-    error: { bg: "#ffe6e6", border: "#ff4444", text: "#ff4444" },
-  }
-
-  const color = colors[type]
-
-  return (
-    <div
-      style={{
-        padding: "12px 16px",
-        backgroundColor: color.bg,
-        border: `1px solid ${color.border}`,
-        borderRadius: "8px",
-        marginBottom: "10px",
-      }}
-    >
-      <div style={{ fontWeight: "600", color: color.text, marginBottom: "4px" }}>{title}</div>
-      <div style={{ fontSize: "14px", color: color.text }}>{status}</div>
-      {details && <div style={{ fontSize: "12px", color: "#666", marginTop: "4px" }}>{details}</div>}
-    </div>
-  )
-}
-
-// 🎨 Loading Spinner Component
-const LoadingSpinner = ({ size = 20 }: { size?: number }) => (
-  <div
-    style={{
-      width: size,
-      height: size,
-      border: `2px solid #e0e0e0`,
-      borderTop: `2px solid #007acc`,
-      borderRadius: "50%",
-      animation: "spin 1s linear infinite",
-      display: "inline-block",
-      marginRight: "8px",
-    }}
-  />
-)
-
-// 🔥 UPDATED: API Status Component for enhanced CSV strategy
-const APIStatusPanel = ({
-  apiTestResults,
-  isVisible,
-  onToggle,
-  onRefreshTests,
-}: {
-  apiTestResults: any
-  isVisible: boolean
-  onToggle: () => void
-  onRefreshTests: () => void
-}) => (
-  <div style={{ marginBottom: "20px" }}>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-      <button
-        onClick={onToggle}
-        style={{
-          padding: "8px 16px",
-          backgroundColor: "#f8f9fa",
-          border: "1px solid #dee2e6",
-          borderRadius: "6px",
-          cursor: "pointer",
-          fontSize: "12px",
-          fontWeight: "500",
-        }}
-      >
-        {isVisible ? "🔽 Ẩn" : "🔼 Hiện"} API Status Debug ({apiTestResults?.workingKeys || 0}/
-        {apiTestResults?.totalKeys || 0} working)
-      </button>
-
-      {isVisible && (
-        <button
-          onClick={onRefreshTests}
-          style={{
-            padding: "6px 12px",
-            backgroundColor: "#007acc",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-            fontSize: "11px",
-          }}
-        >
-          🔄 Test lại APIs
-        </button>
-      )}
-    </div>
-
-    {isVisible && apiTestResults && (
-      <div
-        style={{
-          padding: "15px",
-          backgroundColor: "#f8f9fa",
-          borderRadius: "8px",
-          border: "1px solid #dee2e6",
-        }}
-      >
-        <div style={{ marginBottom: "15px" }}>
-          <h4 style={{ margin: "0 0 10px 0", fontSize: "14px" }}>
-            🔑 API Keys Status: {apiTestResults.workingKeys}/{apiTestResults.totalKeys} hoạt động
-          </h4>
-          <div style={{ fontSize: "12px", color: "#666" }}>
-            Model: {apiTestResults.keyDetails?.[0]?.model || "meta-llama/llama-4-scout-17b-16e-instruct"}
-          </div>
-          <div style={{ fontSize: "12px", color: "#4caf50", marginTop: "5px" }}>
-            🎯 Strategy: Enhanced CSV (Zero Data Loss) + Random API selection
-          </div>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "10px" }}>
-          {apiTestResults.keyDetails?.map((key: any, index: number) => (
-            <div
-              key={index}
-              style={{
-                padding: "10px",
-                backgroundColor: key.status === "success" ? "#e8f5e8" : "#ffe6e6",
-                border: `1px solid ${key.status === "success" ? "#4caf50" : "#ff4444"}`,
-                borderRadius: "6px",
-              }}
-            >
-              <div
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}
-              >
-                <span style={{ fontWeight: "600", fontSize: "12px" }}>API {key.keyIndex}</span>
-                <span
-                  style={{
-                    fontSize: "11px",
-                    color: key.status === "success" ? "#4caf50" : "#ff4444",
-                    fontWeight: "600",
-                  }}
-                >
-                  {key.status === "success" ? "✅ WORKING" : "❌ FAILED"}
-                </span>
-              </div>
-
-              <div style={{ fontSize: "10px", color: "#666", marginBottom: "5px" }}>{key.preview}</div>
-
-              {key.status === "success" ? (
-                <div style={{ fontSize: "11px", color: "#4caf50" }}>
-                  Response: "{key.response}" ({key.responseTime}ms)
-                </div>
-              ) : (
-                <div style={{ fontSize: "11px", color: "#ff4444" }}>Error: {key.error?.substring(0, 50)}...</div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Enhanced CSV Strategy Info */}
-        <div style={{ marginTop: "15px", padding: "10px", backgroundColor: "#e8f5e8", borderRadius: "6px" }}>
-          <h5 style={{ margin: "0 0 8px 0", fontSize: "13px", color: "#4caf50" }}>📄 Enhanced CSV Strategy:</h5>
-          <div style={{ fontSize: "12px", color: "#4caf50" }}>
-            • Zero Data Loss: Complete field extraction với comprehensive preservation
-            <br />• Enhanced CSV: Clean structure với human-readable field names
-            <br />• Complete extraction: All Lark Base objects → meaningful values
-            <br />• Random API selection: Chọn ngẫu nhiên từ {apiTestResults.workingKeys} working APIs
-            <br />• Model: meta-llama/llama-4-scout-17b-16e-instruct
-            <br />• <strong>Benefit: Maximum data preservation + AI-friendly format</strong>
-          </div>
-        </div>
-      </div>
-    )}
-  </div>
-)
-
 export default function ChatBot({ tableId, tableName }: ChatBotProps) {
-  // States
-  const [tableData, setTableData] = useState<Array<{ recordId: string; fields: Record<string, unknown> }>>([])
+  const [tableData, setTableData] = useState<Array<{ recordId: string; fields: Record<string, any> }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [question, setQuestion] = useState("")
   const [answer, setAnswer] = useState("")
   const [isAsking, setIsAsking] = useState(false)
-  const [autoAnalysis, setAutoAnalysis] = useState<string>("")
-  const [isAutoAnalyzing, setIsAutoAnalyzing] = useState(false)
-  const [tableStats, setTableStats] = useState<any>(null)
-  const [keyUsageInfo, setKeyUsageInfo] = useState<any>(null)
-  const [isDataReady, setIsDataReady] = useState<boolean>(false)
-  const [optimizedData, setOptimizedData] = useState<string>("")
+  const [analysis, setAnalysis] = useState("")
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [stats, setStats] = useState<any>(null)
 
-  // 🎨 UI States
-  const [currentStep, setCurrentStep] = useState(0)
-  const [processingStatus, setProcessingStatus] = useState<string>("")
-  const [showDebugTools, setShowDebugTools] = useState(false)
-
-  // API Status States
-  const [apiTestResults, setApiTestResults] = useState<any>(null)
-  const [showApiStatus, setShowApiStatus] = useState(false)
-  const [isTestingApis, setIsTestingApis] = useState(false)
-
-  // Refs
-  const hasLoadedData = useRef(false)
-  const hasRunPipeline = useRef(false)
-  const isInitializing = useRef(false)
-
-  // 🔥 UPDATED: Pipeline Steps for enhanced CSV
-  const pipelineSteps = ["Kiểm tra SDK", "Test APIs", "Lấy dữ liệu", "Enhanced CSV", "Phân tích AI"]
-
-  // Test API Keys Function
-  const testApiKeys = async () => {
-    setIsTestingApis(true)
-    try {
-      console.log("🧪 Testing all API keys...")
-      const results = await testAllApiKeys()
-      setApiTestResults(results)
-
-      // Auto show API status if there are failed keys
-      if (results.workingKeys < results.totalKeys) {
-        setShowApiStatus(true)
-      }
-
-      console.log("✅ API test results:", results)
-    } catch (error) {
-      console.error("❌ API testing failed:", error)
-      setApiTestResults({
-        success: false,
-        message: "API testing failed",
-        workingKeys: 0,
-        totalKeys: 0,
-        keyDetails: [],
-      })
-    } finally {
-      setIsTestingApis(false)
-    }
-  }
-
-  // 🔥 UPDATED: Enhanced CSV preprocessing với field metadata
-  const performDataPreprocessing = async (data: Array<{ recordId: string; fields: Record<string, unknown> }>) => {
-    if (data.length === 0 || hasRunPipeline.current) return
-
-    const hasRealData = data.some((record) =>
-      Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
-    )
-
-    if (!hasRealData) {
-      setAutoAnalysis("⚠️ Dữ liệu không có thông tin chi tiết fields.")
-      return
-    }
-
-    hasRunPipeline.current = true
-    setIsAutoAnalyzing(true)
-    setCurrentStep(4)
-
-    try {
-      setProcessingStatus("🚀 Bắt đầu Enhanced CSV Pipeline với ZERO DATA LOSS...")
-
-      // Get enhanced field metadata
-      const { fieldTypes, fieldNames } = await getTableDataWithTypes(tableId)
-      const fieldMetadata = { fieldTypes, fieldNames }
-
-      const result = await preprocessDataWithPipeline(data, tableName, fieldMetadata)
-
-      if (result.success) {
-        setOptimizedData(result.optimizedData)
-        setAutoAnalysis(result.analysis)
-        setKeyUsageInfo(result.keyUsage)
-        setIsDataReady(true)
-        setCurrentStep(4)
-        setProcessingStatus("✅ Enhanced CSV Pipeline hoàn thành!")
-
-        // 🔥 Check for data loss
-        if (result.keyUsage.stats && result.keyUsage.stats.dataPreservationRate < 100) {
-          setProcessingStatus(
-            `⚠️ Pipeline hoàn thành với ${100 - result.keyUsage.stats.dataPreservationRate}% data loss`,
-          )
-        }
-      } else {
-        setAutoAnalysis(result.analysis)
-        setIsDataReady(false)
-        setProcessingStatus("❌ Pipeline thất bại")
-      }
-    } catch (err) {
-      console.error("❌ Pipeline error:", err)
-      setAutoAnalysis("❌ Không thể thực hiện Enhanced CSV pipeline.")
-      setIsDataReady(false)
-      setProcessingStatus("❌ Pipeline lỗi")
-      hasRunPipeline.current = false
-    } finally {
-      setIsAutoAnalyzing(false)
-    }
-  }
-
-  // 🔧 Optimized useEffect
+  // Load data when component mounts
   useEffect(() => {
-    const initializeData = async () => {
-      if (isInitializing.current || hasLoadedData.current) return
-
-      isInitializing.current = true
-      setLoading(true)
-      setError(null)
-      setCurrentStep(0)
-
+    const loadData = async () => {
       try {
-        // Step 1: SDK Check
-        setProcessingStatus("🔍 Kiểm tra SDK...")
-        const status = await checkSDKStatus()
+        setLoading(true)
+        setError(null)
 
-        if (status.status === "error") {
-          throw new Error(status.message)
-        }
-        setCurrentStep(1)
+        console.log(`📊 Loading data from table: ${tableName}`)
 
-        // Step 2: Test API Keys
-        setProcessingStatus("🧪 Test API keys...")
-        await testApiKeys()
-        setCurrentStep(2)
-
-        // Step 3: Get Basic Stats
-        setProcessingStatus("📊 Lấy thống kê bảng...")
-        const stats = await getTableStats(tableId)
-        setTableStats(stats)
-
-        // 🔥 Step 4: MULTI-STRATEGY DATA EXTRACTION
-        setProcessingStatus(`🚀 Multi-strategy extraction cho ${stats.totalRecords} records...`)
-
-        // Import the new function
-        const { getTableDataWithMultipleStrategies } = await import("../lib/base")
-
-        const extractionResult = await getTableDataWithMultipleStrategies(tableId)
-
-        setTableData(extractionResult.data)
-        hasLoadedData.current = true
-        setCurrentStep(3)
-
-        // Update processing status with extraction results
-        const dataLoss = extractionResult.dataQuality.dataLossPercentage
-        if (dataLoss === 0) {
-          setProcessingStatus(`✅ ZERO DATA LOSS! Strategy: ${extractionResult.strategy}`)
-        } else if (dataLoss < 5) {
-          setProcessingStatus(`✅ Minimal loss (${dataLoss.toFixed(1)}%) - Strategy: ${extractionResult.strategy}`)
-        } else {
-          setProcessingStatus(`⚠️ Data loss: ${dataLoss.toFixed(1)}% - Strategy: ${extractionResult.strategy}`)
+        // Test API first
+        const apiTest = await testAPI()
+        if (!apiTest.success) {
+          throw new Error("No working API keys")
         }
 
-        console.log(`✅ Multi-strategy extraction completed:`)
-        console.log(`  📊 Expected: ${extractionResult.dataQuality.totalExpected}`)
-        console.log(`  ✅ Extracted: ${extractionResult.dataQuality.totalExtracted}`)
-        console.log(`  📉 Loss: ${extractionResult.dataQuality.dataLossPercentage.toFixed(1)}%`)
-        console.log(`  🎯 Strategy: ${extractionResult.strategy}`)
+        // Get table stats
+        const tableStats = await getTableStats(tableId)
+        setStats(tableStats)
+        console.log(`📊 Table stats:`, tableStats)
 
-        if (extractionResult.data.length === 0) {
-          setError("Không thể lấy dữ liệu với bất kỳ strategy nào.")
-          return
-        }
+        // Get table data
+        const data = await getTableData(tableId)
+        setTableData(data)
+        console.log(`✅ Loaded ${data.length} records`)
 
-        setTableStats((prev:any) => ({
-          ...prev,
-          extractionReport: extractionResult.extractionReport,
-          extractionStrategy: extractionResult.strategy,
-          dataQuality: extractionResult.dataQuality,
-        }))
-
-        // Step 5: Process Data with Enhanced CSV
-        const hasRealData = extractionResult.data.some((record) =>
-          Object.values(record.fields).some((value) => value !== null && value !== undefined && value !== ""),
-        )
-
-        if (hasRealData) {
-          await performDataPreprocessing(extractionResult.data)
-        } else {
-          setError("Không có dữ liệu chi tiết fields sau khi extract.")
+        // Auto analyze if we have data
+        if (data.length > 0) {
+          setIsAnalyzing(true)
+          const analysisResult = await analyzeDataSimple(data, tableName)
+          if (analysisResult.success) {
+            setAnalysis(analysisResult.analysis)
+          } else {
+            setAnalysis(analysisResult.analysis)
+          }
+          setIsAnalyzing(false)
         }
       } catch (err) {
-        console.error("❌ Initialization error:", err)
+        console.error("❌ Error loading data:", err)
         setError(err instanceof Error ? err.message : String(err))
-        hasLoadedData.current = false
-        hasRunPipeline.current = false
       } finally {
         setLoading(false)
-        isInitializing.current = false
       }
     }
 
-    if (tableId && !hasLoadedData.current) {
-      initializeData()
+    if (tableId) {
+      loadData()
     }
   }, [tableId, tableName])
 
-  // Question Handler
   const handleAskQuestion = async () => {
-    if (!question.trim() || !isDataReady) return
+    if (!question.trim() || tableData.length === 0) return
 
     setIsAsking(true)
     setAnswer("")
 
     try {
-      const response = await answerQuestionWithData(tableData, tableName, question, autoAnalysis, optimizedData)
+      const response = await answerQuestion(tableData, tableName, question)
       setAnswer(response)
     } catch (err) {
-      setAnswer(`❌ Lỗi: ${err instanceof Error ? err.message : String(err)}`)
+      setAnswer(`❌ Error: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setIsAsking(false)
     }
   }
 
-  // 🎨 Loading State
   if (loading) {
     return (
-      <div style={{ padding: "20px", maxWidth: "800px" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: "20px" }}>
-          <LoadingSpinner size={24} />
-          <h2 style={{ margin: 0 }}>📊 Đang xử lý bảng "{tableName}"</h2>
-        </div>
-
-        <ProgressSteps currentStep={currentStep} steps={pipelineSteps} />
-
-        <StatusCard
-          title="Trạng thái xử lý"
-          status={processingStatus}
-          details={tableStats ? `${tableStats.totalRecords} records, ${tableStats.totalFields} fields` : undefined}
-          type="info"
-        />
-
-        {isTestingApis && (
-          <StatusCard
-            title="🧪 Testing API Keys"
-            status="Đang kiểm tra tất cả API keys với Llama 4 Scout..."
-            details="Model: meta-llama/llama-4-scout-17b-16e-instruct"
-            type="info"
-          />
-        )}
-
-        {isAutoAnalyzing && (
-          <StatusCard
-            title="🚀 Enhanced CSV Pipeline"
-            status="Đang convert sang Enhanced CSV với ZERO DATA LOSS..."
-            details="Complete field extraction → Clean CSV structure → Zero data loss guarantee"
-            type="info"
-          />
-        )}
+      <div style={{ padding: "20px" }}>
+        <h2>📊 Loading "{tableName}"...</h2>
+        <div>🔄 Getting table data...</div>
       </div>
     )
   }
 
-  // 🎨 Main Interface
+  if (error) {
+    return (
+      <div style={{ padding: "20px" }}>
+        <h2>❌ Error</h2>
+        <div style={{ color: "red", marginBottom: "10px" }}>{error}</div>
+        <button onClick={() => window.location.reload()}>🔄 Retry</button>
+      </div>
+    )
+  }
+
   return (
-    <div style={{ padding: "20px", maxWidth: "1000px", margin: "0 auto" }}>
+    <div style={{ padding: "20px", maxWidth: "800px" }}>
       {/* Header */}
-      <div style={{ marginBottom: "20px" }}>
-        <h2 style={{ margin: "0 0 10px 0", color: "#333" }}>📊 {tableName}</h2>
-        <ProgressSteps currentStep={currentStep} steps={pipelineSteps} />
-      </div>
+      <h2>📊 {tableName}</h2>
 
-      {/* API Status Panel */}
-      {apiTestResults && (
-        <APIStatusPanel
-          apiTestResults={apiTestResults}
-          isVisible={showApiStatus}
-          onToggle={() => setShowApiStatus(!showApiStatus)}
-          onRefreshTests={testApiKeys}
-        />
-      )}
-
-      {/* Status Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px", marginBottom: "20px" }}>
-        {tableStats && (
-          <StatusCard
-            title="📊 Multi-Strategy Extraction"
-            status={`${tableStats.totalRecords} expected → ${tableData.length} extracted`}
-            details={
-              tableStats.extractionStrategy
-                ? `Strategy: ${tableStats.extractionStrategy} | Loss: ${tableStats.dataQuality?.dataLossPercentage?.toFixed(1) || 0}%`
-                : `Loaded: ${tableData.length} records`
-            }
-            type={
-              tableStats.dataQuality?.dataLossPercentage === 0
-                ? "success"
-                : tableStats.dataQuality?.dataLossPercentage < 5
-                  ? "warning"
-                  : "error"
-            }
-          />
-        )}
-
-        {keyUsageInfo && (
-          <StatusCard
-            title="📄 Enhanced CSV Pipeline"
-            status={`API ${keyUsageInfo.usedAPI || "N/A"} được chọn ngẫu nhiên`}
-            details={
-              keyUsageInfo.totalTokens
-                ? `${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms | ${keyUsageInfo.stats?.dataPreservationRate?.toFixed(1) || "N/A"}% preserved`
-                : `Strategy: ${keyUsageInfo.strategy} | Zero data loss target`
-            }
-            type={keyUsageInfo.stats?.dataPreservationRate === 100 ? "success" : "warning"}
-          />
-        )}
-      </div>
-
-      {/* Multi-Strategy Extraction Report */}
-      {tableStats && tableStats.extractionReport && (
-        <div style={{ marginBottom: "20px" }}>
-          <StatusCard
-            title="🔍 Multi-Strategy Extraction Report"
-            status={`Best strategy: ${tableStats.extractionStrategy}`}
-            details={`${tableStats.dataQuality?.dataLossPercentage?.toFixed(1) || 0}% data loss`}
-            type={tableStats.dataQuality?.dataLossPercentage === 0 ? "success" : "warning"}
-          />
-
-          <div style={{ marginTop: "10px" }}>
-            <button
-              onClick={() => setShowDebugTools(!showDebugTools)}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#f8f9fa",
-                border: "1px solid #dee2e6",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-                fontWeight: "500",
-              }}
-            >
-              {showDebugTools ? "🔽 Ẩn" : "🔼 Hiện"} Extraction Details
-            </button>
+      {/* Stats */}
+      {stats && (
+        <div
+          style={{
+            padding: "15px",
+            backgroundColor: "#f0f0f0",
+            borderRadius: "8px",
+            marginBottom: "20px",
+          }}
+        >
+          <div>
+            📊 Records: {tableData.length}/{stats.totalRecords}
           </div>
-
-          {showDebugTools && (
-            <div
-              style={{
-                marginTop: "15px",
-                padding: "15px",
-                backgroundColor: "#f8f9fa",
-                borderRadius: "8px",
-                border: "1px solid #dee2e6",
-              }}
-            >
-              <pre style={{ fontSize: "12px", whiteSpace: "pre-wrap", color: "#333" }}>
-                {tableStats.extractionReport}
-              </pre>
-
-              {tableStats.dataQuality?.strategies && (
-                <div style={{ marginTop: "15px" }}>
-                  <h5 style={{ margin: "0 0 10px 0", fontSize: "13px" }}>Strategy Performance:</h5>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                      gap: "10px",
-                    }}
-                  >
-                    {tableStats.dataQuality.strategies.map((strategy: any, index: number) => (
-                      <div
-                        key={index}
-                        style={{
-                          padding: "10px",
-                          backgroundColor: strategy.success ? "#e8f5e8" : "#ffe6e6",
-                          border: `1px solid ${strategy.success ? "#4caf50" : "#ff4444"}`,
-                          borderRadius: "6px",
-                        }}
-                      >
-                        <div style={{ fontWeight: "600", fontSize: "12px", marginBottom: "5px" }}>{strategy.name}</div>
-                        <div style={{ fontSize: "11px", color: strategy.success ? "#4caf50" : "#ff4444" }}>
-                          {strategy.success ? `✅ ${strategy.recordCount} records` : `❌ ${strategy.error}`}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Data Loss Warning (if any) */}
-      {tableStats && tableData.length !== tableStats.totalRecords && (
-        <div style={{ marginBottom: "20px" }}>
-          <StatusCard
-            title="⚠️ Data Loss Detection"
-            status={`Mất ${tableStats.totalRecords - tableData.length} records tại nguồn (Lark Base SDK)`}
-            details={`Expected: ${tableStats.totalRecords}, Loaded: ${tableData.length}. Đây là vấn đề từ SDK, không phải conversion.`}
-            type="warning"
-          />
-
-          <div style={{ textAlign: "center", marginTop: "10px" }}>
-            <button
-              onClick={() => setShowApiStatus(true)}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#ffc107",
-                color: "#856404",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-                fontWeight: "500",
-              }}
-            >
-              🔍 Xem chi tiết API status
-            </button>
+          <div>📋 Fields: {stats.totalFields}</div>
+          <div>
+            ✅ Data loaded: {tableData.filter((r) => Object.keys(r.fields).length > 0).length} records with data
           </div>
         </div>
       )}
 
-      {/* CSV Data Loss Warning (if any) */}
-      {keyUsageInfo && keyUsageInfo.stats && keyUsageInfo.stats.dataPreservationRate < 100 && (
+      {/* Analysis */}
+      {isAnalyzing && (
         <div style={{ marginBottom: "20px" }}>
-          <StatusCard
-            title="⚠️ CSV Conversion Data Loss"
-            status={`Mất ${(100 - keyUsageInfo.stats.dataPreservationRate).toFixed(1)}% data trong quá trình conversion`}
-            details={`Preserved: ${keyUsageInfo.stats.dataPreservationRate.toFixed(1)}% | Extracted: ${keyUsageInfo.stats.extractionSuccessRate?.toFixed(1) || "N/A"}% | Errors: ${keyUsageInfo.stats.extractionErrors || 0}`}
-            type="error"
-          />
-
-          <div style={{ textAlign: "center", marginTop: "10px" }}>
-            <button
-              onClick={() => setShowApiStatus(true)}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#ff4444",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-                fontWeight: "500",
-              }}
-            >
-              🔍 Xem chi tiết conversion issues
-            </button>
-          </div>
+          <div>🤖 Analyzing data...</div>
         </div>
       )}
 
-      {/* Error State */}
-      {error && (
-        <div style={{ marginBottom: "20px" }}>
-          <StatusCard title="❌ Lỗi xử lý" status={error} type="error" />
-
-          <div style={{ textAlign: "center", marginTop: "10px" }}>
-            <button
-              onClick={() => setShowDebugTools(!showDebugTools)}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#f8f9fa",
-                border: "1px solid #dee2e6",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-            >
-              {showDebugTools ? "Ẩn" : "Hiện"} Debug Tools
-            </button>
-          </div>
-
-          {showDebugTools && (
-            <div
-              style={{
-                marginTop: "15px",
-                padding: "15px",
-                backgroundColor: "#f8f9fa",
-                borderRadius: "8px",
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-                gap: "10px",
-              }}
-            >
-              <button onClick={() => debugTableStructure(tableId)} style={{ padding: "6px 12px", fontSize: "11px" }}>
-                🔍 Debug
-              </button>
-              <button onClick={() => testTableAccess(tableId)} style={{ padding: "6px 12px", fontSize: "11px" }}>
-                🧪 Test Access
-              </button>
-              <button onClick={() => testTableDataSample(tableId, 5)} style={{ padding: "6px 12px", fontSize: "11px" }}>
-                📊 Sample
-              </button>
-              <button onClick={testApiKeys} style={{ padding: "6px 12px", fontSize: "11px" }}>
-                🔑 Test APIs
-              </button>
-              <button onClick={() => window.location.reload()} style={{ padding: "6px 12px", fontSize: "11px" }}>
-                🔄 Reload
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Analysis Results */}
-      {autoAnalysis && (
-        <div style={{ marginBottom: "20px" }}>
-          <StatusCard
-            title="🤖 Phân tích AI với Enhanced CSV"
-            status="Phân tích từ Enhanced CSV data hoàn thành"
-            details={
-              keyUsageInfo
-                ? `API ${keyUsageInfo.usedAPI} | ${keyUsageInfo.totalTokens} tokens | ${keyUsageInfo.responseTime}ms | ${keyUsageInfo.stats?.dataPreservationRate?.toFixed(1) || "N/A"}% data preserved`
-                : undefined
-            }
-            type={keyUsageInfo?.stats?.dataPreservationRate === 100 ? "success" : "warning"}
-          />
-          <div
-            style={{
-              marginTop: "10px",
-              padding: "15px",
-              backgroundColor: "white",
-              border: "1px solid #dee2e6",
-              borderRadius: "8px",
-              whiteSpace: "pre-wrap",
-              fontSize: "14px",
-              lineHeight: "1.5",
-            }}
-          >
-            {autoAnalysis}
-          </div>
+      {analysis && (
+        <div
+          style={{
+            marginBottom: "20px",
+            padding: "15px",
+            backgroundColor: "#e8f5e8",
+            borderRadius: "8px",
+            border: "1px solid #4caf50",
+          }}
+        >
+          <h3>🤖 AI Analysis</h3>
+          <div style={{ whiteSpace: "pre-wrap", fontSize: "14px" }}>{analysis}</div>
         </div>
       )}
 
@@ -780,112 +156,57 @@ export default function ChatBot({ tableId, tableName }: ChatBotProps) {
           style={{
             padding: "20px",
             backgroundColor: "white",
-            border: "1px solid #dee2e6",
-            borderRadius: "12px",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+            border: "1px solid #ddd",
+            borderRadius: "8px",
           }}
         >
-          <h3 style={{ margin: "0 0 15px 0", color: "#333" }}>🤖 Hỏi AI về dữ liệu</h3>
-
-          <div style={{ marginBottom: "15px", fontSize: "13px", color: "#666" }}>
-            {isDataReady ? (
-              <span style={{ color: keyUsageInfo?.stats?.dataPreservationRate === 100 ? "#4caf50" : "#ff9800" }}>
-                {keyUsageInfo?.stats?.dataPreservationRate === 100 ? "✅" : "⚠️"} AI đã phân tích {tableData.length}{" "}
-                records với Enhanced CSV ({keyUsageInfo?.stats?.dataPreservationRate?.toFixed(1) || "N/A"}% data
-                preserved).
-                {keyUsageInfo && keyUsageInfo.usedAPI && (
-                  <span style={{ color: "#007acc" }}> API {keyUsageInfo.usedAPI} được sử dụng.</span>
-                )}
-              </span>
-            ) : (
-              <span style={{ color: "#ff9800" }}>⏳ Đang xử lý {tableData.length} records...</span>
-            )}
-          </div>
+          <h3>🤖 Ask questions about the data</h3>
 
           <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ví dụ: Có bao nhiêu records thực tế? Phân tích theo phòng ban, thống kê thiết bị..."
+            placeholder="Ask questions about your data..."
             rows={3}
             style={{
               width: "100%",
-              padding: "12px",
-              border: "1px solid #dee2e6",
-              borderRadius: "8px",
-              fontSize: "14px",
-              resize: "vertical",
-              marginBottom: "15px",
+              padding: "10px",
+              border: "1px solid #ddd",
+              borderRadius: "4px",
+              marginBottom: "10px",
             }}
-            disabled={!isDataReady}
           />
 
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <button
-              onClick={handleAskQuestion}
-              disabled={isAsking || !question.trim() || !isDataReady}
-              style={{
-                padding: "10px 20px",
-                backgroundColor: isDataReady ? "#007acc" : "#ccc",
-                color: "white",
-                border: "none",
-                borderRadius: "8px",
-                cursor: isDataReady ? "pointer" : "not-allowed",
-                fontSize: "14px",
-                fontWeight: "500",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              {isAsking && <LoadingSpinner size={16} />}
-              {isAsking ? "Đang suy nghĩ..." : "🚀 Hỏi AI (Enhanced CSV)"}
-            </button>
+          <button
+            onClick={handleAskQuestion}
+            disabled={isAsking || !question.trim()}
+            style={{
+              padding: "10px 20px",
+              backgroundColor: "#007acc",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            {isAsking ? "🤔 Thinking..." : "🚀 Ask AI"}
+          </button>
 
-            <div style={{ fontSize: "12px", color: "#666" }}>
-              {keyUsageInfo && `${keyUsageInfo.totalRecords} records`}
-              {apiTestResults && ` | ${apiTestResults.workingKeys}/${apiTestResults.totalKeys} APIs`}
-              {keyUsageInfo && keyUsageInfo.format && ` | ${keyUsageInfo.format}`}
-            </div>
-          </div>
-
-          {/* Answer */}
           {answer && (
             <div
               style={{
-                marginTop: "20px",
+                marginTop: "15px",
                 padding: "15px",
-                backgroundColor: answer.includes("❌") ? "#ffe6e6" : "#e8f5e8",
-                border: `1px solid ${answer.includes("❌") ? "#ff4444" : "#4caf50"}`,
-                borderRadius: "8px",
+                backgroundColor: "#f8f9fa",
+                border: "1px solid #dee2e6",
+                borderRadius: "4px",
               }}
             >
-              <h4 style={{ margin: "0 0 10px 0", color: "#333" }}>💡 Câu trả lời từ Llama 4 Scout (Enhanced CSV)</h4>
-              <div style={{ whiteSpace: "pre-wrap", fontSize: "14px", lineHeight: "1.5" }}>{answer}</div>
-              {keyUsageInfo && (
-                <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
-                  📊 Dựa trên {keyUsageInfo.totalRecords} records qua Enhanced CSV Pipeline với API{" "}
-                  {keyUsageInfo.usedAPI}
-                  {keyUsageInfo.stats && keyUsageInfo.stats.dataPreservationRate && (
-                    <span> | Data preservation: {keyUsageInfo.stats.dataPreservationRate.toFixed(1)}%</span>
-                  )}
-                </div>
-              )}
+              <h4>💡 Answer</h4>
+              <div style={{ whiteSpace: "pre-wrap" }}>{answer}</div>
             </div>
           )}
         </div>
       )}
-
-      {/* Add CSS for spinner animation */}
-      <style jsx>{`
-        @keyframes spin {
-          0% {
-            transform: rotate(0deg);
-          }
-          100% {
-            transform: rotate(360deg);
-          }
-        }
-      `}</style>
     </div>
   )
 }
