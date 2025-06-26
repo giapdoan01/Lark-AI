@@ -5,10 +5,10 @@ const API_KEYS = [
   process.env.NEXT_PUBLIC_GROQ_API_KEY_1 || "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",
   process.env.NEXT_PUBLIC_GROQ_API_KEY_2 || "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",
   process.env.NEXT_PUBLIC_GROQ_API_KEY_3 || "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",
-  process.env.NEXT_PUBLIC_GROQ_API_KEY_3 || "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",
+  process.env.NEXT_PUBLIC_GROQ_API_KEY_4 || "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",
 ].filter((key) => key && key.startsWith("gsk_"))
 
-const MODEL = "llama-3.1-70b-versatile"
+const MODEL = "meta-llama/llama-prompt-guard-2-86m"
 
 // Cache đơn giản
 const testResultsCache = new Map<string, boolean>()
@@ -968,6 +968,74 @@ export const testAPI = async () => {
     success: !!groq,
     message: groq ? "API working" : "No working APIs",
     model: MODEL,
+  }
+}
+
+// 🔥 NEW: Test all API keys immediately
+export const testAllApiKeys = async (): Promise<{
+  success: boolean
+  message: string
+  workingKeys: number
+  totalKeys: number
+  keyDetails: any[]
+}> => {
+  console.log(`🧪 Testing ${API_KEYS.length} API keys với ${MODEL}...`)
+
+  const testPromises = API_KEYS.map(async (apiKey, index) => {
+    try {
+      const groq = new Groq({
+        apiKey: apiKey,
+        dangerouslyAllowBrowser: true,
+      })
+      const startTime = Date.now()
+
+      const testCompletion = await groq.chat.completions.create({
+        model: MODEL,
+        messages: [
+          {
+            role: "user",
+            content: "Test: Return 'OK'",
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 10,
+      })
+
+      const responseTime = Date.now() - startTime
+      const response = testCompletion?.choices?.[0]?.message?.content || "No response"
+      console.log(`✅ API ${index + 1}: OK (${responseTime}ms)`)
+
+      return {
+        keyIndex: index + 1,
+        status: "success" as const,
+        response: response,
+        responseTime: responseTime,
+        preview: `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`,
+        model: MODEL,
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      console.log(`❌ API ${index + 1}: ${errorMsg}`)
+      return {
+        keyIndex: index + 1,
+        status: "failed" as const,
+        error: errorMsg,
+        preview: `${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`,
+        model: MODEL,
+        responseTime: 0,
+      }
+    }
+  })
+
+  const results = await Promise.all(testPromises)
+  const workingKeys = results.filter((r) => r.status === "success").length
+
+  return {
+    success: workingKeys > 0,
+    message: `${workingKeys}/${API_KEYS.length} API keys hoạt động với ${MODEL}`,
+    workingKeys: workingKeys,
+    totalKeys: API_KEYS.length,
+    keyDetails: results,
   }
 }
 
